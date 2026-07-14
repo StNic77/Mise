@@ -1,0 +1,416 @@
+:root {
+  --surface: #E8E9E7;
+  --surface-raised: #FFFFFF;
+  --ink: #2B2D2E;
+  --ink-muted: #6B7072;
+  --line: #D4D6D3;
+  --accent: #3E5C6B;
+  --accent-hover: #33505E;
+  --accent-soft: #E4ECEF;
+  --highlight: #C77D33;
+  --danger: #A83E3E;
+  --radius: 8px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: 1rem;
+}
+
+a { color: var(--accent); }
+
+/* ---- App shell ---- */
+
+#app-header {
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+
+#app-header h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+#app-header .build-stamp {
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  margin-top: 0.15rem;
+}
+
+#tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  padding: 0.5rem 1rem 0;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
+}
+
+.tab-btn {
+  border: none;
+  background: none;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+#app-main {
+  flex: 1;
+  padding: 1rem 1.25rem 6rem;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ---- Cards ---- */
+
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.card .meta {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+/* ---- Buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  padding: 0.55rem 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.btn:hover { background: var(--accent-hover); }
+
+.btn.secondary {
+  background: transparent;
+  color: var(--accent);
+}
+.btn.secondary:hover { background: var(--accent-soft); }
+
+.btn.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn.small { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+
+/* ---- Form elements ---- */
+
+.field { margin-bottom: 0.9rem; }
+.field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.field input[type="text"],
+.field input[type="number"],
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+.field textarea { min-height: 4rem; resize: vertical; }
+
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.choice-chip {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+.choice-chip.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---- Day / slot cards (menu screen) ---- */
+
+.day-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.day-row:last-child { border-bottom: none; }
+.day-label { font-weight: 600; min-width: 4.5rem; }
+.slot-pills { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.slot-pill {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.slot-pill.plan { border-color: var(--accent); color: var(--accent); }
+.slot-pill.eating_out { border-color: var(--highlight); color: var(--highlight); }
+.slot-pill.special { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.slot-pill.skip { color: var(--ink-muted); }
+
+/* ---- Shopping list ---- */
+
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.shop-item.purchased { opacity: 0.5; }
+.shop-item.purchased .shop-item-name { text-decoration: line-through; }
+.shop-item-name { flex: 1; }
+.shop-item-qty { font-size: 0.8rem; color: var(--ink-muted); }
+.shop-item-price {
+  width: 4.5rem;
+  padding: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}
+
+.category-heading {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin: 1.25rem 0 0.4rem;
+}
+
+/* ---- Dropped/rejected revival section ---- */
+
+.revival-section {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+}
+.revival-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--ink-muted);
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+}
+
+/* ---- Empty state ---- */
+
+.empty-state {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--ink-muted);
+}
+
+/* ---- Footer action bar ---- */
+
+#action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--line);
+  padding: 0.6rem 1rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.toast {
+  position: fixed;
+  bottom: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  z-index: 100;
+}
+
+/* ---- Added for cycles/mealslots/shoppinglist screens ---- */
+
+.day-card {
+  border-left: 3px solid var(--accent);
+}
+
+.slot-result {
+  margin-top: 0.3rem;
+}
+
+.chat-thread {
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.chat-bubble {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  max-width: 85%;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.chat-bubble.assistant {
+  align-self: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+#chat-input {
+  width: 100%;
+  min-height: 3rem;
+}
+
+.checklist-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+  gap: 0.5rem;
+}
+
+.checklist-row:last-child {
+  border-bottom: none;
+}
+
+.mark-chip {
+  min-width: 2.2rem;
+  text-align: center;
+  padding: 0.3rem 0.6rem;
+}
+
+.mark-chip.danger.selected {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}
+
+.shopping-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.shopping-item:last-child {
+  border-bottom: none;
+}
+
+.shopping-item.purchased .item-name {
+  text-decoration: line-through;
+  color: var(--ink-muted);
+}
+
+.shopping-item-tap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.shopping-item-tap input[type="checkbox"] {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex-shrink: 0;
+}
+
+.item-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.price-input {
+  width: 4.5rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+}
