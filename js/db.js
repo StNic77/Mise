@@ -6,7 +6,7 @@
 const DB_NAME = 'mise-db';
 const DB_STORE = 'state';
 const STATE_KEY = 'app-state';
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 function emptyState() {
   return {
@@ -142,6 +142,24 @@ const migrations = {
     }
     delete state.proteinRarity;
     state._v = 4;
+    return state;
+  },
+  4: (state) => {
+    // v5: normalize every recipe's cuisine/protein/texture tags to
+    // lowercase+trimmed. The manual recipe editor used to save these
+    // as-typed (no case normalization), so "Mediterranean" and
+    // "mediterranean" could both exist as distinct tags depending on
+    // capitalization at save time \u2014 this collapses any such duplicates
+    // retroactively. Going forward the editor normalizes on save, so this
+    // shouldn't recur.
+    (state.recipes || []).forEach((r) => {
+      if (r.tags) {
+        if (r.tags.cuisine) r.tags.cuisine = r.tags.cuisine.trim().toLowerCase();
+        if (r.tags.protein) r.tags.protein = r.tags.protein.trim().toLowerCase();
+        if (r.tags.texture) r.tags.texture = r.tags.texture.trim().toLowerCase();
+      }
+    });
+    state._v = 5;
     return state;
   },
 };

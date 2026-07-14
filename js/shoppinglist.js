@@ -24,6 +24,20 @@ const CATEGORY_LABELS = {
   other: 'Other',
 };
 
+function prettifyCategoryLabel(key) {
+  return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Known categories first (fixed, sensible walk order), then any custom
+// category actually present in the list that isn't in the fixed map \u2014
+// otherwise items sent from a custom checklist category would silently
+// never render at all.
+function categoryDisplayOrder(byCategory) {
+  const known = Object.keys(CATEGORY_LABELS);
+  const extra = Object.keys(byCategory).filter((k) => !known.includes(k));
+  return [...known, ...extra];
+}
+
 export function addItems(state, items, source) {
   state.shoppingList = state.shoppingList || [];
   items.forEach((item) => {
@@ -68,7 +82,8 @@ export function renderShoppingList(state, container, { saveState, toast }) {
     html += `<div class="empty-state">Nothing on the list yet. Generate a menu, run the checklist, or add something manually.</div>`;
   }
 
-  for (const [cat, label] of Object.entries(CATEGORY_LABELS)) {
+  for (const cat of categoryDisplayOrder(byCategory)) {
+    const label = CATEGORY_LABELS[cat] || prettifyCategoryLabel(cat);
     const items = byCategory[cat];
     if (!items || !items.length) continue;
     html += `<div class="card">
@@ -245,7 +260,8 @@ export function exportAsMarkdown(state) {
   });
 
   let md = `GROCERY NEEDS \u2014 ${new Date().toISOString().slice(0, 10)}\n\n`;
-  for (const [cat, label] of Object.entries(CATEGORY_LABELS)) {
+  for (const cat of categoryDisplayOrder(byCategory)) {
+    const label = CATEGORY_LABELS[cat] || prettifyCategoryLabel(cat);
     const items = byCategory[cat];
     if (!items || !items.length) continue;
     md += `${label.toUpperCase()}\n`;

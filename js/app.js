@@ -53,7 +53,7 @@ function renderMenuTab(container) {
     onRequestRecipe: (cycle, request) => renderRequestedRecipe(container, cycle, request),
     onMenuReady: async (cycle) => {
       toast('Generating menu...');
-      await generateMenu(state, cycle, { saveState, toast, aiEnabled: true });
+      await generateMenu(state, cycle, { saveState, toast, aiEnabled: false });
       renderMenuResults(container, cycle);
     },
   });
@@ -350,9 +350,10 @@ function renderMenuResults(container, cycle) {
           const recipe = slot.result?.pendingRecipe || state.recipes.find((r) => r.id === slot.result?.recipeId);
           return `<div class="field">
             <div class="meta">Dinner: ${recipe ? escapeHtml(recipe.title) + (recipe.source === 'ai_generated' ? ' (AI \u2014 not yet saved)' : '') : slot.result?.notes || 'unassigned'}</div>
-            <div style="display:flex; gap:0.4rem; margin-top:0.3rem;">
+            <div style="display:flex; gap:0.4rem; margin-top:0.3rem; flex-wrap:wrap;">
               <button class="btn secondary small swap-btn" data-date="${day.date}">Swap this night</button>
               ${recipe && recipe.source === 'ai_generated' && !state.recipes.find((r) => r.id === recipe.id) ? `<button class="btn secondary small save-ai-btn" data-date="${day.date}">Save to library</button>` : ''}
+              ${slot.result ? `<button class="btn danger small clear-slot-btn" data-date="${day.date}" data-slot="dinner">Clear</button>` : ''}
             </div>
           </div>`;
         }
@@ -365,7 +366,10 @@ function renderMenuResults(container, cycle) {
             }
             return escapeHtml(slot.result.transcriptSummary || '');
           })()}</div>
-          <button class="btn secondary small plan-slot-btn" data-date="${day.date}" data-slot="${slotType}">${slot.result ? 'Re-plan' : 'Get ideas'}</button>
+          <div style="display:flex; gap:0.4rem; margin-top:0.3rem; flex-wrap:wrap;">
+            <button class="btn secondary small plan-slot-btn" data-date="${day.date}" data-slot="${slotType}">${slot.result ? 'Re-plan' : 'Get ideas'}</button>
+            ${slot.result ? `<button class="btn danger small clear-slot-btn" data-date="${day.date}" data-slot="${slotType}">Clear</button>` : ''}
+          </div>
         </div>`;
       }).join('')}
     </div>`;
@@ -383,6 +387,17 @@ function renderMenuResults(container, cycle) {
     btn.addEventListener('click', () => {
       const day = cycle.days.find((d) => d.date === btn.dataset.date);
       swapNight(state, cycle, day, { saveState, toast });
+      renderMenuResults(container, cycle);
+    });
+  });
+
+  container.querySelectorAll('.clear-slot-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const day = cycle.days.find((d) => d.date === btn.dataset.date);
+      const slotType = btn.dataset.slot;
+      day.slots[slotType].result = null;
+      saveState();
+      toast(`Cleared ${slotType} on ${day.dayOfWeek.toUpperCase()}`);
       renderMenuResults(container, cycle);
     });
   });

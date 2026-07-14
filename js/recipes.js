@@ -11,6 +11,7 @@ function uid(prefix) {
 // Persists across re-renders of this tab (module-level, resets on page reload)
 // so the filter stays put while you're adding/editing/assigning recipes.
 let activeCuisineFilter = null;
+let proteinSearchTerm = '';
 
 // Does this recipe violate any active profile's restrictions?
 // strict -> excluded outright. flexible -> allowed but flagged (caller can deprioritize).
@@ -314,43 +315,55 @@ export function renderRecipes(state, container, { saveState, toast }) {
     </div>`;
   }
 
+  html += `<div class="card">
+    <h3>Search by protein</h3>
+    <input type="text" id="protein-search-input" placeholder="e.g. chicken, pork, tofu..." value="${escapeAttr(proteinSearchTerm)}">
+  </div>`;
+
   const detectedProteins = recipes.map((r) => r.tags?.protein?.toLowerCase().trim()).filter(Boolean);
   const manuallyAdded = Object.keys(state.rarity || {});
   const rarityItems = [...new Set([...detectedProteins, ...manuallyAdded])].sort();
 
   html += `<div class="card">
-    <h3>Rarity</h3>
-    <div class="meta">For any ingredient that's rare, expensive, or hard to get \u2014 not a taste preference, a shopping-reality control. Not limited to proteins. "Rare" still gets suggested once it's been long enough since you last cooked it; "Avoid" never auto-suggests but you can always assign it manually.</div>
-    ${rarityItems.length ? rarityItems.map((p) => {
-      const rarity = (state.rarity || {})[p];
-      const tier = rarity?.tier || 'none';
-      const window = rarity?.windowDays || 90;
-      return `<div class="checklist-row" data-item="${p}" style="flex-wrap:wrap;">
-        <span>${escapeHtml(p)}</span>
-        <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
-          <div class="choice-row rarity-row" data-item="${p}">
-            <button type="button" class="choice-chip rarity-chip ${tier === 'none' ? 'selected' : ''}" data-tier="none">No restriction</button>
-            <button type="button" class="choice-chip rarity-chip ${tier === 'rare' ? 'selected' : ''}" data-tier="rare">Rare</button>
-            <button type="button" class="choice-chip rarity-chip ${tier === 'avoid' ? 'selected' : ''}" data-tier="avoid">Avoid</button>
+    <details>
+      <summary style="cursor:pointer; font-weight:600; font-size:1.05rem;">Rarity</summary>
+      <div class="meta" style="margin-top:0.4rem;">For any ingredient that's rare, expensive, or hard to get \u2014 not a taste preference, a shopping-reality control. Not limited to proteins. "Rare" still gets suggested once it's been long enough since you last cooked it; "Avoid" never auto-suggests but you can always assign it manually.</div>
+      ${rarityItems.length ? rarityItems.map((p) => {
+        const rarity = (state.rarity || {})[p];
+        const tier = rarity?.tier || 'none';
+        const window = rarity?.windowDays || 90;
+        return `<div class="checklist-row" data-item="${p}" style="flex-wrap:wrap;">
+          <span>${escapeHtml(p)}</span>
+          <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
+            <div class="choice-row rarity-row" data-item="${p}">
+              <button type="button" class="choice-chip rarity-chip ${tier === 'none' ? 'selected' : ''}" data-tier="none">No restriction</button>
+              <button type="button" class="choice-chip rarity-chip ${tier === 'rare' ? 'selected' : ''}" data-tier="rare">Rare</button>
+              <button type="button" class="choice-chip rarity-chip ${tier === 'avoid' ? 'selected' : ''}" data-tier="avoid">Avoid</button>
+            </div>
+            ${tier === 'rare' ? `<input type="number" class="rarity-window-input" data-item="${p}" value="${window}" min="7" max="365" style="width:4.5rem; padding:0.3rem;"> days` : ''}
+            <button class="btn danger small remove-rarity-item-btn" data-item="${p}">Remove</button>
           </div>
-          ${tier === 'rare' ? `<input type="number" class="rarity-window-input" data-item="${p}" value="${window}" min="7" max="365" style="width:4.5rem; padding:0.3rem;"> days` : ''}
-          <button class="btn danger small remove-rarity-item-btn" data-item="${p}">Remove</button>
-        </div>
-      </div>`;
-    }).join('') : '<div class="meta">No items yet.</div>'}
-    <div style="display:flex; gap:0.4rem; margin-top:0.6rem;">
-      <input type="text" id="add-rarity-item-input" placeholder="Add any ingredient, e.g. saffron, truffle oil, lamb..." style="flex:1;">
-      <button class="btn secondary small" id="add-rarity-item-btn">Add</button>
-    </div>
+        </div>`;
+      }).join('') : '<div class="meta">No items yet.</div>'}
+      <div style="display:flex; gap:0.4rem; margin-top:0.6rem;">
+        <input type="text" id="add-rarity-item-input" placeholder="Add any ingredient, e.g. saffron, truffle oil, lamb..." style="flex:1;">
+        <button class="btn secondary small" id="add-rarity-item-btn">Add</button>
+      </div>
+    </details>
   </div>`;
 
-  const visibleRecipes = activeCuisineFilter ? recipes.filter((r) => r.tags?.cuisine === activeCuisineFilter) : recipes;
+  const visibleRecipes = recipes
+    .filter((r) => !activeCuisineFilter || r.tags?.cuisine === activeCuisineFilter)
+    .filter((r) => !proteinSearchTerm || (r.tags?.protein || '').toLowerCase().includes(proteinSearchTerm.toLowerCase()));
 
 
   if (!recipes.length) {
     html += `<div class="empty-state">No recipes yet. Add one, or import your starter JSON from Settings.</div>`;
   } else if (!visibleRecipes.length) {
-    html += `<div class="empty-state">No recipes tagged "${escapeHtml(activeCuisineFilter.replace(/_/g, ' '))}" yet.</div>`;
+    const filterDescriptions = [];
+    if (activeCuisineFilter) filterDescriptions.push(`cuisine "${activeCuisineFilter.replace(/_/g, ' ')}"`);
+    if (proteinSearchTerm) filterDescriptions.push(`protein matching "${proteinSearchTerm}"`);
+    html += `<div class="empty-state">No recipes match ${filterDescriptions.join(' and ')}.</div>`;
   } else {
     for (const r of visibleRecipes) {
       html += `<div class="card" data-recipe-id="${r.id}">
@@ -374,6 +387,19 @@ export function renderRecipes(state, container, { saveState, toast }) {
       renderRecipes(state, container, { saveState, toast });
     });
   });
+
+  const proteinSearchInput = container.querySelector('#protein-search-input');
+  if (proteinSearchInput) {
+    proteinSearchInput.addEventListener('input', () => {
+      proteinSearchTerm = proteinSearchInput.value;
+      renderRecipes(state, container, { saveState, toast });
+      const newInput = container.querySelector('#protein-search-input');
+      if (newInput) {
+        newInput.focus();
+        newInput.setSelectionRange(newInput.value.length, newInput.value.length);
+      }
+    });
+  }
 
   state.rarity = state.rarity || {};
   container.querySelectorAll('.rarity-row').forEach((row) => {
@@ -685,9 +711,9 @@ function openRecipeEditor(state, container, recipe, { saveState, toast }) {
     recipe.title = container.querySelector('#f-title').value.trim();
     if (!recipe.title) { toast('Title is required'); return; }
     recipe.tags = {
-      cuisine: container.querySelector('#f-cuisine').value.trim(),
-      protein: container.querySelector('#f-protein').value.trim(),
-      texture: container.querySelector('#f-texture').value.trim(),
+      cuisine: container.querySelector('#f-cuisine').value.trim().toLowerCase(),
+      protein: container.querySelector('#f-protein').value.trim().toLowerCase(),
+      texture: container.querySelector('#f-texture').value.trim().toLowerCase(),
       ...flags,
     };
     recipe.totalTimeMinutes = Number(container.querySelector('#f-time').value) || null;

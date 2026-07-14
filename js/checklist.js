@@ -1,8 +1,9 @@
 // checklist.js — the Standing Checklist (staples/household only, never
 // produce/meat). +/-/x marking, with a visible grayed-out "revive" list for
-// anything x'd out by mistake.
+// anything x'd out by mistake. Categories are dynamic: the built-in ones
+// below get friendly labels, but the user can add any custom category too.
 
-const CATEGORY_LABELS = {
+const KNOWN_CATEGORY_LABELS = {
   dairy_eggs: 'Dairy & Eggs',
   bread_bakery: 'Bread & Bakery',
   canned_dry: 'Canned & Dry',
@@ -13,14 +14,29 @@ const CATEGORY_LABELS = {
   personal_care: 'Personal Care',
 };
 
+function prettifyLabel(key) {
+  return key.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function slugify(name) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
 export function renderChecklist(state, container, { saveState, toast, onSendToShoppingList }) {
   const checklist = state.checklist;
-  let html = '';
+  let html = `<div class="card">
+    <h3>Add a category</h3>
+    <div style="display:flex; gap:0.4rem;">
+      <input type="text" id="add-category-input" placeholder="e.g. Pet Supplies, Garden, Office...">
+      <button class="btn secondary small" id="add-category-btn">Add</button>
+    </div>
+  </div>`;
 
-  for (const [key, label] of Object.entries(CATEGORY_LABELS)) {
+  for (const key of Object.keys(checklist.categories)) {
+    const label = KNOWN_CATEGORY_LABELS[key] || checklist.customCategoryLabels?.[key] || prettifyLabel(key);
     const items = checklist.categories[key] || [];
     html += `<div class="card">
-      <h3>${label}</h3>
+      <h3>${escapeHtml(label)}</h3>
       <div class="checklist-items" data-category="${key}">
         ${items.map((item, idx) => `
           <div class="checklist-row">
@@ -59,6 +75,23 @@ export function renderChecklist(state, container, { saveState, toast, onSendToSh
   </div>`;
 
   container.innerHTML = html;
+
+  container.querySelector('#add-category-btn').addEventListener('click', () => {
+    const input = container.querySelector('#add-category-input');
+    const name = input.value.trim();
+    if (!name) return;
+    const key = slugify(name);
+    if (!key) { toast('Type a valid category name'); return; }
+    if (checklist.categories[key]) { toast('That category already exists'); return; }
+    checklist.categories[key] = [];
+    // Remember the friendly display name the user actually typed, since the
+    // key itself gets slugified (spaces/punctuation stripped).
+    checklist.customCategoryLabels = checklist.customCategoryLabels || {};
+    checklist.customCategoryLabels[key] = name;
+    saveState();
+    toast(`Added category "${name}"`);
+    renderChecklist(state, container, { saveState, toast, onSendToShoppingList });
+  });
 
   container.querySelectorAll('.mark-row').forEach((row) => {
     row.querySelectorAll('.mark-chip').forEach((chip) => {

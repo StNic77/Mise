@@ -177,30 +177,32 @@ export function reverseMenuToGroceryLines(state, cycle) {
   const grouped = new Map(); // normalizedName -> { name, quantities: Set<string>, nights: Set<string>, category }
 
   for (const day of cycle.days) {
-    const slot = day.slots.dinner;
-    if (slot.state !== 'plan' || !slot.result) continue;
-    const recipe = slot.result.pendingRecipe || state.recipes.find((r) => r.id === slot.result.recipeId);
-    if (!recipe) continue;
-    const servingsKey = slot.result.servings === 1 ? 'amount1' : slot.result.servings >= 4 ? 'amount4' : 'amount2';
-    [...(recipe.ingredients || []), ...(recipe.sauce || [])].forEach((ing) => {
-      if (isAlwaysStocked(ing.name)) return;
-      const isMeat = /pork|beef|chicken|fish|salmon|shrimp|tofu|egg|thigh|belly/i.test(ing.name)
-        && !/egg\b/i.test(ing.name); // eggs already excluded as staple above, but keep this readable
-      const quantity = ing[servingsKey] || ing.amount1 || '';
-      const key = ing.name.trim().toLowerCase().replace(/\s+/g, ' ');
+    for (const slotType of ['breakfast', 'lunch', 'dinner']) {
+      const slot = day.slots[slotType];
+      if (slot.state !== 'plan' || !slot.result) continue;
+      const recipe = slot.result.pendingRecipe || state.recipes.find((r) => r.id === slot.result.recipeId);
+      if (!recipe) continue;
+      const servingsKey = slot.result.servings === 1 ? 'amount1' : slot.result.servings >= 4 ? 'amount4' : 'amount2';
+      [...(recipe.ingredients || []), ...(recipe.sauce || [])].forEach((ing) => {
+        if (isAlwaysStocked(ing.name)) return;
+        const isMeat = /pork|beef|chicken|fish|salmon|shrimp|tofu|egg|thigh|belly/i.test(ing.name)
+          && !/egg\b/i.test(ing.name); // eggs already excluded as staple above, but keep this readable
+        const quantity = ing[servingsKey] || ing.amount1 || '';
+        const key = ing.name.trim().toLowerCase().replace(/\s+/g, ' ');
 
-      if (!grouped.has(key)) {
-        grouped.set(key, {
-          name: ing.name.trim(),
-          quantities: new Set(),
-          nights: new Set(),
-          category: isMeat ? 'meat_protein' : 'produce',
-        });
-      }
-      const entry = grouped.get(key);
-      if (quantity) entry.quantities.add(quantity);
-      entry.nights.add(day.dayOfWeek);
-    });
+        if (!grouped.has(key)) {
+          grouped.set(key, {
+            name: ing.name.trim(),
+            quantities: new Set(),
+            nights: new Set(),
+            category: isMeat ? 'meat_protein' : 'produce',
+          });
+        }
+        const entry = grouped.get(key);
+        if (quantity) entry.quantities.add(quantity);
+        entry.nights.add(`${day.dayOfWeek} (${slotType})`);
+      });
+    }
   }
 
   return [...grouped.values()].map((entry) => ({
