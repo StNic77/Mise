@@ -54,11 +54,11 @@ export { activeProfilesFor };
 // saving it into the library if it isn't there yet (source: 'ai_generated').
 // Used by the idea-picker flow \u2014 recipes get built as the user picks, not
 // written by hand beforehand.
-export function assignRecipeToDay(state, day, recipe, { saveState }) {
+export function assignRecipeToDay(state, day, recipe, { saveState }, slotType = 'dinner') {
   if (!state.recipes.find((r) => r.id === recipe.id)) {
     state.recipes.push(recipe);
   }
-  day.slots.dinner.result = { recipeId: recipe.id, servings: 2, notes: '' };
+  day.slots[slotType].result = { recipeId: recipe.id, servings: 2, notes: '' };
   saveState();
 }
 

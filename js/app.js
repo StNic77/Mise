@@ -124,28 +124,46 @@ async function renderRequestedRecipe(container, cycle, request) {
 }
 
 async function renderIdeaPicker(container, cycle) {
-  const openDays = cycle.days.filter((d) => d.slots.dinner.state === 'plan' && !d.slots.dinner.result && d.activeProfileIds.length > 0);
-  if (!openDays.length) {
-    toast('No open nights to fill \u2014 every dinner slot is either already assigned, not set to Plan, or has nobody selected as present.');
+  const slotTypes = ['breakfast', 'lunch', 'dinner'];
+  const openByType = {};
+  slotTypes.forEach((st) => {
+    openByType[st] = cycle.days.filter((d) => d.slots[st].state === 'plan' && !d.slots[st].result && d.activeProfileIds.length > 0);
+  });
+  const totalOpen = slotTypes.reduce((sum, st) => sum + openByType[st].length, 0);
+
+  if (!totalOpen) {
+    toast('No open meals to fill \u2014 every breakfast/lunch/dinner slot is either already assigned, not set to Plan, or has nobody selected as present.');
     return;
   }
 
-  const profileIds = new Set();
-  openDays.forEach((d) => d.activeProfileIds.forEach((id) => profileIds.add(id)));
-  const profiles = state.profiles.filter((p) => profileIds.has(p.id));
-  const count = Math.min(openDays.length + 4, 12);
+  container.innerHTML = `<div class="card"><div class="meta">Asking AI for dish ideas...</div></div>`;
 
-  container.innerHTML = `<div class="card"><div class="meta">Asking AI for ${count} dish ideas...</div></div>`;
-  const result = await api.getRecipeIdeaBatch({
-    cuisineWeighting: cycle.cuisineWeighting,
-    activeProfiles: profiles,
-    count,
-    recentTitles: recentTitles(state, cycle.id),
-    rarityConstraints: buildRarityConstraintText(state),
-    onHandNote: cycle.onHandNote,
-  });
+  const allIdeas = [];
+  for (const st of slotTypes) {
+    const openDays = openByType[st];
+    if (!openDays.length) continue;
 
-  if (!result || !result.ideas?.length) {
+    const profileIds = new Set();
+    openDays.forEach((d) => d.activeProfileIds.forEach((id) => profileIds.add(id)));
+    const profiles = state.profiles.filter((p) => profileIds.has(p.id));
+    const count = Math.min(openDays.length + (st === 'dinner' ? 4 : 2), 12);
+
+    const result = await api.getRecipeIdeaBatch({
+      cuisineWeighting: cycle.cuisineWeighting,
+      activeProfiles: profiles,
+      count,
+      recentTitles: recentTitles(state, cycle.id),
+      rarityConstraints: buildRarityConstraintText(state),
+      onHandNote: cycle.onHandNote,
+      mealType: st,
+    });
+
+    if (result?.ideas?.length) {
+      result.ideas.forEach((idea) => allIdeas.push({ ...idea, mealType: st }));
+    }
+  }
+
+  if (!allIdeas.length) {
     container.innerHTML = `<div class="card">
       <div class="meta">Couldn't reach the AI assistant, or it didn't return usable ideas. Check js/api.js's ENDPOINT is set, then try again \u2014 or add recipes manually in the Recipes tab.</div>
       <button class="btn secondary small" id="back-btn" style="margin-top:0.5rem;">Back</button>
@@ -154,35 +172,36 @@ async function renderIdeaPicker(container, cycle) {
     return;
   }
 
-  renderIdeaList(container, cycle, result.ideas, openDays);
+  renderIdeaList(container, cycle, allIdeas, openByType);
 }
 
-function renderIdeaList(container, cycle, ideas, openDays) {
+function renderIdeaList(container, cycle, ideas, openByType) {
   let html = `<div class="card">
     <button class="btn secondary small" id="back-to-setup-btn">\u2190 Back to setup</button>
-    <div class="meta" style="margin-top:0.4rem;">Pick an idea, then either assign it to a specific night, drop it on a random open night, or just send it to your recipe library to use later. Full recipe gets written and saved once you pick any of the three.</div>
+    <div class="meta" style="margin-top:0.4rem;">Pick an idea, then either assign it to a specific day, drop it on a random open slot of the same meal type, or just send it to your recipe library to use later. Full recipe gets written and saved once you pick any of the three.</div>
   </div>`;
 
   html += `<div class="card">
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
-      <button class="btn" id="bulk-random-btn">Assign to random nights (fills all open nights)</button>
+      <button class="btn" id="bulk-random-btn">Assign to random slots (fills all open meals)</button>
       <button class="btn secondary" id="bulk-saveall-btn">Save all remaining to Recipes</button>
     </div>
     <div id="bulk-status" class="meta" style="margin-top:0.4rem;"></div>
   </div>`;
 
   ideas.forEach((idea, i) => {
+    const openDays = openByType[idea.mealType] || [];
     html += `<div class="card idea-card" data-idx="${i}">
-      <h3>${escapeHtml(idea.title)}</h3>
+      <h3>${escapeHtml(idea.title)} <span class="meta">(${idea.mealType.toUpperCase()})</span></h3>
       <div class="meta">${escapeHtml(idea.cuisine || '')} \u00b7 ${escapeHtml(idea.protein || '')} \u00b7 ${escapeHtml(idea.texture || '')}</div>
       <div style="margin-top:0.3rem;">${escapeHtml(idea.oneLiner || '')}</div>
       <div style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center; flex-wrap:wrap;">
-        <select class="day-select" data-idx="${i}">
+        <select class="day-select" data-idx="${i}" data-mealtype="${idea.mealType}">
           <option value="">Assign to...</option>
           ${openDays.map((d) => `<option value="${d.date}">${d.dayOfWeek.toUpperCase()} ${d.date}</option>`).join('')}
         </select>
         <button class="btn small assign-idea-btn" data-idx="${i}">Assign</button>
-        <button class="btn secondary small random-idea-btn" data-idx="${i}">Random night</button>
+        <button class="btn secondary small random-idea-btn" data-idx="${i}">Random ${idea.mealType === 'dinner' ? 'night' : 'day'}</button>
         <button class="btn secondary small save-only-btn" data-idx="${i}">Send to Recipes</button>
       </div>
     </div>`;
@@ -239,8 +258,8 @@ function renderIdeaList(container, cycle, ideas, openDays) {
     };
 
     if (day) {
-      assignRecipeToDay(state, day, fullRecipe, { saveState });
-      container.querySelectorAll('.day-select').forEach((sel) => {
+      assignRecipeToDay(state, day, fullRecipe, { saveState }, idea.mealType);
+      container.querySelectorAll(`.day-select[data-mealtype="${idea.mealType}"]`).forEach((sel) => {
         const opt = sel.querySelector(`option[value="${date}"]`);
         if (opt) opt.remove();
       });
@@ -250,7 +269,7 @@ function renderIdeaList(container, cycle, ideas, openDays) {
     }
 
     card.remove();
-    toast(day ? `"${fullRecipe.title}" assigned to ${day.dayOfWeek.toUpperCase()}` : `"${fullRecipe.title}" saved to your recipe library`);
+    toast(day ? `"${fullRecipe.title}" assigned to ${idea.mealType} on ${day.dayOfWeek.toUpperCase()}` : `"${fullRecipe.title}" saved to your recipe library`);
     return { ok: true, recipe: fullRecipe };
   }
 
@@ -265,7 +284,7 @@ function renderIdeaList(container, cycle, ideas, openDays) {
       const date = select.value;
       if (!date) { toast('Pick a night first, or use Random night / Send to Recipes'); return; }
       const result = await commitIdea(idx, date, btn, 'Writing recipe...');
-      if (result.ok && !anyOpenNightsLeft()) toast('All open nights assigned \u2014 nice.');
+      if (result.ok && !anyOpenNightsLeft()) toast('All open slots assigned \u2014 nice.');
     });
   });
 
@@ -274,10 +293,10 @@ function renderIdeaList(container, cycle, ideas, openDays) {
       const idx = Number(btn.dataset.idx);
       const select = container.querySelector(`.day-select[data-idx="${idx}"]`);
       const options = [...select.querySelectorAll('option')].filter((o) => o.value);
-      if (!options.length) { toast('No open nights left \u2014 try Send to Recipes instead'); return; }
+      if (!options.length) { toast('No open slots left for this meal type \u2014 try Send to Recipes instead'); return; }
       const pick = options[Math.floor(Math.random() * options.length)];
       const result = await commitIdea(idx, pick.value, btn, 'Writing recipe...');
-      if (result.ok && !anyOpenNightsLeft()) toast('All open nights assigned \u2014 nice.');
+      if (result.ok && !anyOpenNightsLeft()) toast('All open slots assigned \u2014 nice.');
     });
   });
 
@@ -308,7 +327,7 @@ function renderIdeaList(container, cycle, ideas, openDays) {
       const result = await commitIdea(idx, pick.value, btn, 'Writing recipe...');
       if (result.ok) assigned++; else { failed++; failedIdx.add(idx); }
     }
-    bulkStatus.textContent = `Done: ${assigned} night(s) assigned${failed ? `, ${failed} idea(s) failed to write \u2014 see the red note on each affected card` : ''}.`;
+    bulkStatus.textContent = `Done: ${assigned} slot(s) assigned${failed ? `, ${failed} idea(s) failed to write \u2014 see the red note on each affected card` : ''}.`;
   });
 
   container.querySelector('#bulk-saveall-btn').addEventListener('click', async () => {

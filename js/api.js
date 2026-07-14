@@ -235,10 +235,17 @@ Return JSON:
   // ingredients/steps yet) matching this week's weighting/profiles. Used to
   // let the user browse and pick before paying for full detail on each.
   // ---------------------------------------------------------------------
-  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, rarityConstraints, onHandNote }) {
-    const system = `You are a dinner idea generator inside a personal meal-planning app called Mise.
+  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, rarityConstraints, onHandNote, mealType = 'dinner' }) {
+    const mealGuidance = {
+      breakfast: 'Suggest genuinely BREAKFAST-appropriate ideas \u2014 quick morning food (eggs, oatmeal, yogurt bowls, toast, pancakes, breakfast burritos, etc.), not dinner-style mains scaled down. Keep prep realistically quick for a morning.',
+      lunch: 'Suggest genuinely LUNCH-appropriate ideas \u2014 lighter, often portable or quick midday food (salads, sandwiches, grain bowls, soups, wraps, leftovers-friendly dishes), not a full dinner-style main course.',
+      dinner: 'Suggest dinner ideas \u2014 the main meal of the day, can be more involved than breakfast/lunch.',
+    }[mealType] || 'Suggest dinner ideas.';
+
+    const system = `You are a ${mealType} idea generator inside a personal meal-planning app called Mise.
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
-Suggest ${count} distinct dinner ideas fitting the cuisine weighting and profile constraints given.
+Suggest ${count} distinct ${mealType} ideas fitting the cuisine weighting and profile constraints given.
+${mealGuidance}
 Keep each idea short — title + one line — this is a browsing list, not a full recipe.
 Respect every profile's strict avoids as hard constraints. Vary proteins and textures across
 the set rather than repeating the same protein in every idea.
@@ -254,8 +261,8 @@ ${onHandNote ? `\nThe user mentioned having this on hand: "${onHandNote}". Use i
 
     const messages = [{
       role: 'user',
-      content: `Cuisine weighting for this week: ${JSON.stringify(cuisineWeighting || {})}.
-Active profiles across this week's open nights:
+      content: `Cuisine weighting for this period: ${JSON.stringify(cuisineWeighting || {})}.
+Active profiles across this period's open ${mealType} slots:
 ${profileText}
 Recently cooked (avoid repeating): ${(recentTitles || []).join(', ') || 'none'}.
 
