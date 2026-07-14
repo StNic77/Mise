@@ -97,8 +97,14 @@ export function renderShoppingList(state, container, { saveState, toast }) {
     cb.addEventListener('change', () => {
       const item = list.find((i) => i.id === cb.dataset.id);
       item.purchased = cb.checked;
-      cb.closest('.shopping-item').classList.toggle('purchased', cb.checked);
       saveState();
+      // Full re-render so button visibility (Consolidate, Regenerate) stays
+      // current \u2014 those depend on purchased/unpurchased counts computed at
+      // render time. Preserve scroll position so it doesn't jump while
+      // actively checking items off during a shop.
+      const scrollPos = window.scrollY;
+      renderShoppingList(state, container, { saveState, toast });
+      window.scrollTo(0, scrollPos);
     });
   });
 
