@@ -53,16 +53,21 @@ export function checkRecipeAgainstProfiles(recipe, profiles) {
   return { allowed: true, deprioritized: hasFlexibleConflict };
 }
 
-// --- Protein rarity -------------------------------------------------------
-// Global (not per-profile) suggestion-frequency control for proteins that
-// are rare/expensive/hard to get (lamb, swordfish, etc.) \u2014 configured via
-// the Recipes tab. This is a cost/availability control, not a taste rule,
-// which is why it lives here rather than in Profile.restrictions.
+// --- Rarity ----------------------------------------------------------------
+// Global (not per-profile) suggestion-frequency control for ingredients that
+// are rare/expensive/hard to get \u2014 not limited to proteins (lamb, swordfish,
+// saffron, truffle oil, whatever). Configured via the Recipes tab. This is a
+// cost/availability control, not a taste rule, which is why it lives here
+// rather than in Profile.restrictions.
 
-// Scans every cycle ever created for the most recent date this protein was
-// actually cooked, so "less than once a quarter" checks real history, not
-// just the current week.
-export function proteinLastUsedDate(state, protein) {
+// Scans every cycle ever created for the most recent date a recipe using
+// this item was actually cooked, so "less than once a quarter" checks real
+// history, not just the current week. Matches either the recipe's protein
+// tag (exact) or the item appearing anywhere in its ingredient/sauce names
+// (substring) \u2014 covers both "lamb" as a protein tag and "saffron" as a
+// plain ingredient that would never be a protein tag.
+export function itemLastUsedDate(state, item) {
+  const key = item.toLowerCase().trim();
   let latest = null;
   (state.cycles || []).forEach((cyc) => {
     cyc.days.forEach((day) => {
@@ -71,7 +76,7 @@ export function proteinLastUsedDate(state, protein) {
         if (!result?.recipeId) return;
         const rec = (state.recipes || []).find((x) => x.id === result.recipeId);
         if (!rec) return;
-        if ((rec.tags?.protein || '').toLowerCase().trim() === protein) {
+        if (recipeMatchesRarityKey(rec, key)) {
           if (!latest || day.date > latest) latest = day.date;
         }
       });
@@ -89,47 +94,67 @@ export function daysSince(dateStr) {
   return Math.round((now - then) / 86400000);
 }
 
+function recipeMatchesRarityKey(recipe, key) {
+  const protein = (recipe.tags?.protein || '').toLowerCase().trim();
+  if (protein === key) return true;
+  const ingredientText = [
+    ...(recipe.ingredients || []).map((i) => i.name),
+    ...(recipe.sauce || []).map((s) => s.name),
+  ].join(' ').toLowerCase();
+  return ingredientText.includes(key);
+}
+
 // 'avoid' excludes outright (still fully assignable manually via Recipes).
 // 'rare' deprioritizes while inside its window \u2014 doesn't exclude, so it can
-// still surface as a last resort if nothing else fits.
-export function checkProteinAllowed(recipe, state) {
-  const protein = (recipe.tags?.protein || '').toLowerCase().trim();
-  if (!protein) return { allowed: true };
-  const rarity = (state.proteinRarity || {})[protein];
-  if (!rarity) return { allowed: true };
+// still surface as a last resort if nothing else fits. A recipe can match
+// more than one rarity entry (e.g. a lamb dish that also uses saffron) \u2014
+// any 'avoid' match excludes it outright; otherwise any 'rare' match still
+// inside its window deprioritizes it.
+export function checkRarityAllowed(recipe, state) {
+  const rarity = state.rarity || {};
+  const matchedKeys = Object.keys(rarity).filter((key) => recipeMatchesRarityKey(recipe, key.toLowerCase().trim()));
+  if (!matchedKeys.length) return { allowed: true };
 
-  if (rarity.tier === 'avoid') {
-    return { allowed: false, reason: `"${protein}" is marked Avoid \u2014 assign it manually from the Recipes tab if you want it` };
-  }
-  if (rarity.tier === 'rare') {
-    const since = daysSince(proteinLastUsedDate(state, protein));
-    const window = rarity.windowDays || 90;
-    if (since < window) {
-      return { allowed: true, deprioritized: true, reason: `"${protein}" used ${since}d ago \u2014 inside its ${window}-day rare window` };
+  for (const key of matchedKeys) {
+    if (rarity[key].tier === 'avoid') {
+      return { allowed: false, reason: `"${key}" is marked Avoid \u2014 assign it manually from the Recipes tab if you want it` };
     }
   }
-  return { allowed: true };
+
+  let deprioritized = false;
+  let reason = null;
+  for (const key of matchedKeys) {
+    if (rarity[key].tier === 'rare') {
+      const since = daysSince(itemLastUsedDate(state, key));
+      const window = rarity[key].windowDays || 90;
+      if (since < window) {
+        deprioritized = true;
+        reason = `"${key}" used ${since}d ago \u2014 inside its ${window}-day rare window`;
+      }
+    }
+  }
+  return { allowed: true, deprioritized, reason };
 }
 
 // Given full app state + active profiles, return the valid candidate pool
-// (intersection of every active profile's constraints, plus protein-rarity
-// rules), sorted so less-recently-used and non-deprioritized recipes come
-// first. Takes `state` rather than just a recipes array because the protein
-// rarity check needs to scan cycle history for "when was this last used."
+// (intersection of every active profile's constraints, plus rarity rules),
+// sorted so less-recently-used and non-deprioritized recipes come first.
+// Takes `state` rather than just a recipes array because the rarity check
+// needs to scan cycle history for "when was this last used."
 export function getCandidatePool(state, profiles, recentTitles = []) {
   const pool = (state.recipes || [])
     .map((r) => {
       const profileCheck = checkRecipeAgainstProfiles(r, profiles);
       if (!profileCheck.allowed) return { recipe: r, check: profileCheck };
-      const proteinCheck = checkProteinAllowed(r, state);
-      if (!proteinCheck.allowed) return { recipe: r, check: { allowed: false, reason: proteinCheck.reason } };
+      const rarityCheck = checkRarityAllowed(r, state);
+      if (!rarityCheck.allowed) return { recipe: r, check: { allowed: false, reason: rarityCheck.reason } };
       return {
         recipe: r,
         check: {
           allowed: true,
           // merge both signals \u2014 a recipe can be deprioritized for texture
-          // reasons AND for protein-rarity reasons at once
-          deprioritized: !!(profileCheck.deprioritized || proteinCheck.deprioritized),
+          // reasons AND for rarity reasons at once
+          deprioritized: !!(profileCheck.deprioritized || rarityCheck.deprioritized),
         },
       };
     })
@@ -289,29 +314,35 @@ export function renderRecipes(state, container, { saveState, toast }) {
     </div>`;
   }
 
-  const proteins = [...new Set(recipes.map((r) => r.tags?.protein?.toLowerCase().trim()).filter(Boolean))].sort();
-  if (proteins.length) {
-    html += `<div class="card">
-      <h3>Protein rarity</h3>
-      <div class="meta">For proteins that are rare, expensive, or hard to get \u2014 not a taste preference, a shopping-reality control. "Rare" still gets suggested once it's been long enough since you last cooked it; "Avoid" never auto-suggests but you can always assign it manually.</div>
-      ${proteins.map((p) => {
-        const rarity = (state.proteinRarity || {})[p];
-        const tier = rarity?.tier || 'none';
-        const window = rarity?.windowDays || 90;
-        return `<div class="checklist-row" data-protein="${p}" style="flex-wrap:wrap;">
-          <span>${p}</span>
-          <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
-            <div class="choice-row rarity-row" data-protein="${p}">
-              <button type="button" class="choice-chip rarity-chip ${tier === 'none' ? 'selected' : ''}" data-tier="none">No restriction</button>
-              <button type="button" class="choice-chip rarity-chip ${tier === 'rare' ? 'selected' : ''}" data-tier="rare">Rare</button>
-              <button type="button" class="choice-chip rarity-chip ${tier === 'avoid' ? 'selected' : ''}" data-tier="avoid">Avoid</button>
-            </div>
-            ${tier === 'rare' ? `<input type="number" class="rarity-window-input" data-protein="${p}" value="${window}" min="7" max="365" style="width:4.5rem; padding:0.3rem;"> days</span>` : ''}
+  const detectedProteins = recipes.map((r) => r.tags?.protein?.toLowerCase().trim()).filter(Boolean);
+  const manuallyAdded = Object.keys(state.rarity || {});
+  const rarityItems = [...new Set([...detectedProteins, ...manuallyAdded])].sort();
+
+  html += `<div class="card">
+    <h3>Rarity</h3>
+    <div class="meta">For any ingredient that's rare, expensive, or hard to get \u2014 not a taste preference, a shopping-reality control. Not limited to proteins. "Rare" still gets suggested once it's been long enough since you last cooked it; "Avoid" never auto-suggests but you can always assign it manually.</div>
+    ${rarityItems.length ? rarityItems.map((p) => {
+      const rarity = (state.rarity || {})[p];
+      const tier = rarity?.tier || 'none';
+      const window = rarity?.windowDays || 90;
+      return `<div class="checklist-row" data-item="${p}" style="flex-wrap:wrap;">
+        <span>${escapeHtml(p)}</span>
+        <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
+          <div class="choice-row rarity-row" data-item="${p}">
+            <button type="button" class="choice-chip rarity-chip ${tier === 'none' ? 'selected' : ''}" data-tier="none">No restriction</button>
+            <button type="button" class="choice-chip rarity-chip ${tier === 'rare' ? 'selected' : ''}" data-tier="rare">Rare</button>
+            <button type="button" class="choice-chip rarity-chip ${tier === 'avoid' ? 'selected' : ''}" data-tier="avoid">Avoid</button>
           </div>
-        </div>`;
-      }).join('')}
-    </div>`;
-  }
+          ${tier === 'rare' ? `<input type="number" class="rarity-window-input" data-item="${p}" value="${window}" min="7" max="365" style="width:4.5rem; padding:0.3rem;"> days` : ''}
+          <button class="btn danger small remove-rarity-item-btn" data-item="${p}">Remove</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="meta">No items yet.</div>'}
+    <div style="display:flex; gap:0.4rem; margin-top:0.6rem;">
+      <input type="text" id="add-rarity-item-input" placeholder="Add any ingredient, e.g. saffron, truffle oil, lamb..." style="flex:1;">
+      <button class="btn secondary small" id="add-rarity-item-btn">Add</button>
+    </div>
+  </div>`;
 
   const visibleRecipes = activeCuisineFilter ? recipes.filter((r) => r.tags?.cuisine === activeCuisineFilter) : recipes;
 
@@ -344,19 +375,19 @@ export function renderRecipes(state, container, { saveState, toast }) {
     });
   });
 
-  state.proteinRarity = state.proteinRarity || {};
+  state.rarity = state.rarity || {};
   container.querySelectorAll('.rarity-row').forEach((row) => {
     row.querySelectorAll('.rarity-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
-        const protein = row.dataset.protein;
+        const item = row.dataset.item;
         const tier = chip.dataset.tier;
         if (tier === 'none') {
-          delete state.proteinRarity[protein];
+          delete state.rarity[item];
         } else if (tier === 'avoid') {
-          state.proteinRarity[protein] = { tier: 'avoid' };
+          state.rarity[item] = { tier: 'avoid' };
         } else {
-          const existingWindow = state.proteinRarity[protein]?.windowDays || 90;
-          state.proteinRarity[protein] = { tier: 'rare', windowDays: existingWindow };
+          const existingWindow = state.rarity[item]?.windowDays || 90;
+          state.rarity[item] = { tier: 'rare', windowDays: existingWindow };
         }
         saveState();
         renderRecipes(state, container, { saveState, toast });
@@ -365,15 +396,38 @@ export function renderRecipes(state, container, { saveState, toast }) {
   });
   container.querySelectorAll('.rarity-window-input').forEach((input) => {
     input.addEventListener('change', () => {
-      const protein = input.dataset.protein;
+      const item = input.dataset.item;
       const days = Math.max(7, Math.min(365, Number(input.value) || 90));
-      if (state.proteinRarity[protein]?.tier === 'rare') {
-        state.proteinRarity[protein].windowDays = days;
+      if (state.rarity[item]?.tier === 'rare') {
+        state.rarity[item].windowDays = days;
         saveState();
-        toast(`"${protein}" rare window set to ${days} days`);
+        toast(`"${item}" rare window set to ${days} days`);
       }
     });
   });
+  container.querySelectorAll('.remove-rarity-item-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = btn.dataset.item;
+      delete state.rarity[item];
+      saveState();
+      toast(`Removed "${item}" from the rarity list`);
+      renderRecipes(state, container, { saveState, toast });
+    });
+  });
+  const addRarityBtn = container.querySelector('#add-rarity-item-btn');
+  if (addRarityBtn) {
+    addRarityBtn.addEventListener('click', () => {
+      const input = container.querySelector('#add-rarity-item-input');
+      const item = input.value.trim().toLowerCase();
+      if (!item) return;
+      if (!state.rarity[item]) {
+        state.rarity[item] = { tier: 'rare', windowDays: 90 };
+      }
+      saveState();
+      toast(`"${item}" added to the rarity list`);
+      renderRecipes(state, container, { saveState, toast });
+    });
+  }
 
   container.querySelector('#add-recipe-btn').addEventListener('click', () => {
     openRecipeEditor(state, container, emptyRecipeForm(), { saveState, toast });

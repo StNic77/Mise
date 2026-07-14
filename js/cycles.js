@@ -164,7 +164,7 @@ function allCuisineTags(state) {
   return [...set];
 }
 
-export function renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas }) {
+export function renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe }) {
   if (!state.profiles.length) {
     renderGettingStarted(state, container, { onNavigate });
     return;
@@ -175,7 +175,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
   const isStale = cycle && (cycle.endDate < today);
 
   if (!cycle || isStale) {
-    renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+    renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     return;
   }
 
@@ -231,6 +231,14 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
     <h3>What's on hand?</h3>
     <div class="meta">Optional. Type it in your own words \u2014 "leftover rotisserie chicken, some lettuce, tortillas, tomatoes." The AI will lean on this for a couple of ideas where it fits naturally, but won't limit the whole list to just these items.</div>
     <textarea id="on-hand-note" placeholder="e.g. leftover rotisserie chicken, half a bag of spinach, a block of feta...">${escapeHtml(cycle.onHandNote)}</textarea>
+    <button class="btn secondary small" id="clear-on-hand-btn" style="margin-top:0.4rem;">Clear</button>
+  </div>`;
+
+  html += `<div class="card">
+    <h3>Want a recipe for something specific?</h3>
+    <div class="meta">Type a dish you already have in mind \u2014 "lasagna," "a good tikka masala," "birthday cake" \u2014 and get a full recipe you can assign to a day right here.</div>
+    <input type="text" id="specific-recipe-input" placeholder="e.g. lasagna" style="margin-bottom:0.5rem;">
+    <button class="btn secondary small" id="request-recipe-btn">Generate recipe</button>
   </div>`;
 
   html += `<div class="card">
@@ -284,7 +292,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
   container.innerHTML = html;
 
   container.querySelector('#start-new-period-btn').addEventListener('click', () => {
-    renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+    renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
   });
 
   const clearFailedBtn = container.querySelector('#clear-failed-btn');
@@ -299,7 +307,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       });
       saveState();
       toast(`Cleared ${cleared} failed attempt(s) \u2014 those nights are open again`);
-      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     });
   }
 
@@ -316,7 +324,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       });
       saveState();
       toast(`Reset ${reset} night(s) \u2014 ready to regenerate`);
-      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     });
   }
 
@@ -335,7 +343,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       ensureTiedArraySize(cycle);
       recomputeCuisineWeighting(cycle);
       saveState();
-      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     });
   });
 
@@ -345,7 +353,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       moveCuisineUp(cycle, i);
       recomputeCuisineWeighting(cycle);
       saveState();
-      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     });
   });
 
@@ -355,7 +363,7 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       moveCuisineDown(cycle, i);
       recomputeCuisineWeighting(cycle);
       saveState();
-      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+      renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
     });
   });
 
@@ -399,6 +407,24 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
       saveState();
     });
   }
+  const clearOnHandBtn = container.querySelector('#clear-on-hand-btn');
+  if (clearOnHandBtn) {
+    clearOnHandBtn.addEventListener('click', () => {
+      onHandInput.value = '';
+      cycle.onHandNote = '';
+      saveState();
+      toast('Cleared');
+    });
+  }
+
+  const requestRecipeBtn = container.querySelector('#request-recipe-btn');
+  if (requestRecipeBtn && onRequestRecipe) {
+    requestRecipeBtn.addEventListener('click', () => {
+      const request = container.querySelector('#specific-recipe-input').value.trim();
+      if (!request) { toast('Type a dish first'); return; }
+      onRequestRecipe(cycle, request);
+    });
+  }
 
   const aiIdeasBtn = container.querySelector('#get-ai-ideas-btn');
   if (aiIdeasBtn && onGetAiIdeas) {
@@ -419,7 +445,7 @@ function escapeHtml(str) {
   return String(str || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas }) {
+function renderNewCycleChooser(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe }) {
   const today = formatDate(new Date());
 
   container.innerHTML = `
@@ -483,7 +509,7 @@ function renderNewCycleChooser(state, container, { saveState, toast, onMenuReady
     state.cycles.push(cycle);
     saveState();
     toast(`Started a ${spanDays}-day planning period`);
-    renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas });
+    renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe });
   });
 }
 

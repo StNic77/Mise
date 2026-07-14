@@ -7,7 +7,7 @@ import { api } from './api.js';
 import { renderProfiles } from './profiles.js';
 import { renderRecipes } from './recipes.js';
 import { renderCycleSetup, currentCycle } from './cycles.js';
-import { generateMenu, swapNight, reverseMenuToGroceryLines, recentTitles, activeProfilesFor, assignRecipeToDay, buildProteinConstraintText } from './menu.js';
+import { generateMenu, swapNight, reverseMenuToGroceryLines, recentTitles, activeProfilesFor, assignRecipeToDay, buildRarityConstraintText } from './menu.js';
 import { planMealSlot, renderSpecialChat } from './mealslots.js';
 import { renderChecklist } from './checklist.js';
 import { renderShoppingList, addItems } from './shoppinglist.js';
@@ -50,11 +50,76 @@ function renderMenuTab(container) {
     saveState, toast,
     onNavigate: (tabKey) => switchTab(tabKey, container),
     onGetAiIdeas: (cycle) => renderIdeaPicker(container, cycle),
+    onRequestRecipe: (cycle, request) => renderRequestedRecipe(container, cycle, request),
     onMenuReady: async (cycle) => {
       toast('Generating menu...');
       await generateMenu(state, cycle, { saveState, toast, aiEnabled: true });
       renderMenuResults(container, cycle);
     },
+  });
+}
+
+async function renderRequestedRecipe(container, cycle, request) {
+  container.innerHTML = `<div class="card"><div class="meta">Writing a recipe for "${escapeHtml(request)}"...</div></div>`;
+
+  const openDays = cycle.days.filter((d) => d.slots.dinner.state === 'plan' && !d.slots.dinner.result && d.activeProfileIds.length > 0);
+  const profileIds = new Set();
+  openDays.forEach((d) => d.activeProfileIds.forEach((id) => profileIds.add(id)));
+  const profiles = state.profiles.filter((p) => profileIds.has(p.id));
+
+  const detail = await api.getRequestedRecipe({ request, activeProfiles: profiles });
+
+  if (!detail || !detail.title) {
+    container.innerHTML = `<div class="card">
+      <div class="meta">Couldn't write that recipe \u2014 check js/api.js's ENDPOINT and the console, then try again.</div>
+      <button class="btn secondary small" id="back-btn" style="margin-top:0.5rem;">Back</button>
+    </div>`;
+    container.querySelector('#back-btn').addEventListener('click', () => renderMenuTab(container));
+    return;
+  }
+
+  const fullRecipe = {
+    id: `rec_${Math.random().toString(36).slice(2, 10)}`,
+    createdAt: new Date().toISOString(),
+    source: 'ai_generated',
+    rejectedCount: 0,
+    ...detail,
+  };
+
+  container.innerHTML = `<div class="card">
+    <button class="btn secondary small" id="back-to-setup-btn">\u2190 Back to setup</button>
+  </div>
+  <div class="card">
+    <h3>${escapeHtml(fullRecipe.title)}</h3>
+    <div class="meta">${escapeHtml(fullRecipe.tags?.cuisine || '')} \u00b7 ${escapeHtml(fullRecipe.tags?.protein || '')} \u00b7 ${escapeHtml(fullRecipe.tags?.texture || '')}${fullRecipe.totalTimeMinutes ? ` \u00b7 ${fullRecipe.totalTimeMinutes} min` : ''}</div>
+    <div class="meta" style="margin-top:0.4rem;">${(fullRecipe.ingredients || []).length} ingredients \u00b7 ${(fullRecipe.steps || []).length} steps</div>
+    <div style="display:flex; gap:0.4rem; margin-top:0.6rem; align-items:center; flex-wrap:wrap;">
+      <select id="request-day-select">
+        <option value="">Assign to...</option>
+        ${openDays.map((d) => `<option value="${d.date}">${d.dayOfWeek.toUpperCase()} ${d.date}</option>`).join('')}
+      </select>
+      <button class="btn small" id="request-assign-btn">Assign</button>
+      <button class="btn secondary small" id="request-save-btn">Just save to Recipes</button>
+    </div>
+    <div class="meta" id="request-status" style="margin-top:0.4rem;"></div>
+  </div>`;
+
+  container.querySelector('#back-to-setup-btn').addEventListener('click', () => renderMenuTab(container));
+
+  container.querySelector('#request-save-btn').addEventListener('click', () => {
+    state.recipes.push(fullRecipe);
+    saveState();
+    toast(`"${fullRecipe.title}" saved to your recipe library`);
+    renderMenuTab(container);
+  });
+
+  container.querySelector('#request-assign-btn').addEventListener('click', () => {
+    const date = container.querySelector('#request-day-select').value;
+    if (!date) { toast('Pick a night first, or use "Just save to Recipes"'); return; }
+    const day = cycle.days.find((d) => d.date === date);
+    assignRecipeToDay(state, day, fullRecipe, { saveState });
+    toast(`"${fullRecipe.title}" assigned to ${day.dayOfWeek.toUpperCase()}`);
+    renderMenuTab(container);
   });
 }
 
@@ -76,7 +141,7 @@ async function renderIdeaPicker(container, cycle) {
     activeProfiles: profiles,
     count,
     recentTitles: recentTitles(state, cycle.id),
-    proteinConstraints: buildProteinConstraintText(state),
+    rarityConstraints: buildRarityConstraintText(state),
     onHandNote: cycle.onHandNote,
   });
 

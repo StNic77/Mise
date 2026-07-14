@@ -66,6 +66,20 @@ export const api = {
     }
 
     const data = await response.json();
+
+    // Defensive: the Worker currently returns HTTP 200 even when the
+    // underlying Anthropic call itself failed (rate limit, overloaded, bad
+    // request, etc.), since it doesn't pass the upstream status code
+    // through. That means response.ok is true here even on a real failure,
+    // and Anthropic's error body has no `content` array \u2014 checking for it
+    // explicitly turns a cryptic "Cannot read properties of undefined
+    // (reading 'filter')" crash into a real, readable error message.
+    if (!data || !Array.isArray(data.content)) {
+      const message = data?.error?.message || 'Unexpected response shape from the Worker \u2014 check the console for the raw response.';
+      console.error('[Mise] Unexpected API response (no content array):', data);
+      throw new Error(message);
+    }
+
     return data.content
       .filter((b) => b.type === 'text')
       .map((b) => b.text)
@@ -77,14 +91,14 @@ export const api = {
   // Returns a full Recipe-shaped object (matching DATA-MODEL.md) or null
   // if the call/parse failed — caller must fall back to a rules-based pick.
   // ---------------------------------------------------------------------
-  async getRecipeSuggestion({ cuisineWeighting, activeProfiles, recentTitles, proteinConstraints, onHandNote }) {
+  async getRecipeSuggestion({ cuisineWeighting, activeProfiles, recentTitles, rarityConstraints, onHandNote }) {
     const system = `You are a recipe suggestion service inside a personal meal-planning app called Mise.
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 Suggest ONE dinner recipe that fits the constraints given. It should feel like a genuine
 new idea, not a copy of something already in recent rotation.
 Respect every profile's restrictions as hard constraints — never include an ingredient
 listed as a strict avoid for any active profile.
-${proteinConstraints ? `\n${proteinConstraints}\nTreat any protein marked AVOID or inside its rare window as off-limits for this suggestion.` : ''}
+${rarityConstraints ? `\n${rarityConstraints}\nTreat any item marked AVOID or inside its rare window as off-limits for this suggestion.` : ''}
 ${onHandNote ? `\nThe user mentioned having this on hand: "${onHandNote}". If it fits naturally, feel free to build this suggestion around it \u2014 but don't force it if it doesn't fit the cuisine/profile constraints.` : ''}`;
 
     const profileText = (activeProfiles || [])
@@ -219,14 +233,14 @@ Return JSON:
   // ingredients/steps yet) matching this week's weighting/profiles. Used to
   // let the user browse and pick before paying for full detail on each.
   // ---------------------------------------------------------------------
-  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, proteinConstraints, onHandNote }) {
+  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, rarityConstraints, onHandNote }) {
     const system = `You are a dinner idea generator inside a personal meal-planning app called Mise.
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 Suggest ${count} distinct dinner ideas fitting the cuisine weighting and profile constraints given.
 Keep each idea short — title + one line — this is a browsing list, not a full recipe.
 Respect every profile's strict avoids as hard constraints. Vary proteins and textures across
 the set rather than repeating the same protein in every idea.
-${proteinConstraints ? `\n${proteinConstraints}\nTreat any protein marked AVOID or inside its rare window as off-limits \u2014 don't include it in any idea.` : ''}
+${rarityConstraints ? `\n${rarityConstraints}\nTreat any item marked AVOID or inside its rare window as off-limits \u2014 don't include it in any idea.` : ''}
 ${onHandNote ? `\nThe user mentioned having this on hand: "${onHandNote}". Use it as inspiration for ONE OR TWO of the ${count} ideas where it fits naturally \u2014 do NOT restrict the whole batch to only these items. The rest of the ideas should still be a broad, varied mix as usual.` : ''}`;
 
     const profileText = (activeProfiles || [])
@@ -404,6 +418,61 @@ Return JSON matching this shape exactly:
       return parsed;
     } catch (e) {
       console.error('getProteinSubstitution failed', e);
+      return null;
+    }
+  },
+
+  // ---------------------------------------------------------------------
+  // getRequestedRecipe — the user names a specific dish ("lasagna," "a good
+  // tikka masala") and gets a full recipe back, same shape as everything
+  // else. Used by the "Want a recipe for something specific?" card on the
+  // cycle setup screen.
+  // ---------------------------------------------------------------------
+  async getRequestedRecipe({ request, activeProfiles }) {
+    const system = `You are a recipe-writing service inside a personal meal-planning app called Mise.
+Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
+Write a full, cookable recipe for exactly what the user asked for. Interpret loosely-worded
+requests reasonably (e.g. "a good tikka masala" -> a genuinely good tikka masala recipe).
+Keep it realistic for a home cook, not a restaurant tasting menu.
+Respect every profile's restrictions as hard constraints \u2014 never include an ingredient
+listed as a strict avoid for any active profile, even if it would normally be essential to
+the dish (substitute or omit it, and mention the swap in reasonInRotation or closingNote).`;
+
+    const profileText = (activeProfiles || [])
+      .map((p) => {
+        const restr = (p.restrictions || []).filter((r) => r.severity === 'strict').map((r) => r.item).join(', ') || 'none';
+        return `- ${p.name}: strict avoids=[${restr}]`;
+      })
+      .join('\n') || '- (no specific profile constraints active)';
+
+    const messages = [{
+      role: 'user',
+      content: `The user wants a recipe for: "${request}"
+Profiles to respect:
+${profileText}
+
+Return JSON matching this shape exactly:
+{
+  "title": "string",
+  "tags": { "cuisine": "string", "protein": "string", "texture": "string", "leftoverFriendly": true, "eatFresh": false, "batchable": false, "vegHidden": false },
+  "totalTimeMinutes": number,
+  "reasonInRotation": "string, one line",
+  "ingredients": [ { "name": "string", "amount1": "string", "amount2": "string", "amount4": "string" } ],
+  "sauce": [ { "name": "string", "amount1": "string", "scaleNote": "string or null" } ],
+  "steps": [ { "text": "string", "timeMinutes": number or null } ],
+  "closingNote": "string or null"
+}`,
+    }];
+
+    try {
+      const raw = await this.send({ system, messages, maxTokens: 1600, model: MODEL_FAST });
+      const parsed = safeParseJSON(raw);
+      if (parsed && !parsed.title) {
+        console.warn('[Mise] getRequestedRecipe: JSON parsed fine but has no "title" field. Parsed result:', parsed);
+      }
+      return parsed;
+    } catch (e) {
+      console.error('getRequestedRecipe failed', e);
       return null;
     }
   },

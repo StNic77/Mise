@@ -4,27 +4,27 @@
 // AI-generated slot (via api.js) for novelty.
 
 import { api } from './api.js';
-import { getCandidatePool, pickWeighted, proteinLastUsedDate, daysSince } from './recipes.js';
+import { getCandidatePool, pickWeighted, itemLastUsedDate, daysSince } from './recipes.js';
 
 function uid(prefix) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
 // Builds a plain-English constraint block to inject into AI prompts, so
-// AI-generated dish ideas/suggestions respect the same protein-rarity rules
-// as the rules engine (recipes.js's getCandidatePool) \u2014 otherwise the AI
-// would happily keep suggesting swordfish even with Avoid set.
-export function buildProteinConstraintText(state) {
-  const entries = Object.entries(state.proteinRarity || {});
+// AI-generated dish ideas/suggestions respect the same rarity rules as the
+// rules engine (recipes.js's getCandidatePool) \u2014 otherwise the AI would
+// happily keep suggesting swordfish (or whatever else) even with Avoid set.
+export function buildRarityConstraintText(state) {
+  const entries = Object.entries(state.rarity || {});
   if (!entries.length) return '';
-  const lines = entries.map(([protein, rarity]) => {
-    if (rarity.tier === 'avoid') return `- ${protein}: AVOID entirely, do not suggest.`;
-    const since = daysSince(proteinLastUsedDate(state, protein));
+  const lines = entries.map(([item, rarity]) => {
+    if (rarity.tier === 'avoid') return `- ${item}: AVOID entirely, do not suggest.`;
+    const since = daysSince(itemLastUsedDate(state, item));
     const window = rarity.windowDays || 90;
-    if (since < window) return `- ${protein}: used ${since} day(s) ago, still inside its ${window}-day rare window \u2014 do not suggest.`;
-    return `- ${protein}: rare ingredient, fine to suggest occasionally (last used ${since === Infinity ? 'never' : since + ' day(s) ago'}, outside its ${window}-day window).`;
+    if (since < window) return `- ${item}: used ${since} day(s) ago, still inside its ${window}-day rare window \u2014 do not suggest.`;
+    return `- ${item}: rare ingredient, fine to suggest occasionally (last used ${since === Infinity ? 'never' : since + ' day(s) ago'}, outside its ${window}-day window).`;
   });
-  return `Protein frequency constraints (real cost/availability limits, not taste preferences):\n${lines.join('\n')}`;
+  return `Rarity constraints (real cost/availability limits, not taste preferences \u2014 may apply to a protein or any other ingredient):\n${lines.join('\n')}`;
 }
 
 
@@ -82,7 +82,7 @@ export async function generateMenu(state, cycle, { saveState, toast, aiEnabled }
         cuisineWeighting: cycle.cuisineWeighting,
         activeProfiles: profiles,
         recentTitles: recent,
-        proteinConstraints: buildProteinConstraintText(state),
+        rarityConstraints: buildRarityConstraintText(state),
         onHandNote: cycle.onHandNote,
       });
       if (suggestion && suggestion.title) {
