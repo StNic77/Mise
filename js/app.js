@@ -7,7 +7,7 @@ import { api } from './api.js';
 import { renderProfiles } from './profiles.js';
 import { renderRecipes } from './recipes.js';
 import { renderCycleSetup, currentCycle } from './cycles.js';
-import { generateMenu, swapNight, reverseMenuToGroceryLines, recentTitles, activeProfilesFor, assignRecipeToDay } from './menu.js';
+import { generateMenu, swapNight, reverseMenuToGroceryLines, recentTitles, activeProfilesFor, assignRecipeToDay, buildProteinConstraintText } from './menu.js';
 import { planMealSlot, renderSpecialChat } from './mealslots.js';
 import { renderChecklist } from './checklist.js';
 import { renderShoppingList, addItems } from './shoppinglist.js';
@@ -76,6 +76,8 @@ async function renderIdeaPicker(container, cycle) {
     activeProfiles: profiles,
     count,
     recentTitles: recentTitles(state, cycle.id),
+    proteinConstraints: buildProteinConstraintText(state),
+    onHandNote: cycle.onHandNote,
   });
 
   if (!result || !result.ideas?.length) {

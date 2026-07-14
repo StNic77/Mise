@@ -6,7 +6,7 @@
 const DB_NAME = 'mise-db';
 const DB_STORE = 'state';
 const STATE_KEY = 'app-state';
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 function emptyState() {
   return {
@@ -87,6 +87,12 @@ function emptyState() {
     },
     shoppingList: [],
     rejectedAiSuggestions: [],
+    proteinRarity: {},
+    // { "lamb": { tier: "rare", windowDays: 90 }, "swordfish": { tier: "avoid" } }
+    // keys are lowercase protein tag strings. tier: "rare" | "avoid".
+    // "rare" only blocks auto-generation while last-used is inside windowDays;
+    // "avoid" always blocks auto-generation. Neither blocks manual assignment
+    // via the Recipes tab \u2014 this is a suggestion-frequency control, not a diet rule.
     mealSlotHistory: [],
   };
 }
@@ -116,6 +122,14 @@ const migrations = {
     state.checklist.categories.canned_dry = (state.checklist.categories.canned_dry || [])
       .filter((item) => item.label !== 'Flour / sugar / baking');
     state._v = 2;
+    return state;
+  },
+  2: (state) => {
+    // v3: protein rarity settings \u2014 didn't exist before, default to empty
+    // (no rarity restrictions) so nothing changes behavior for existing users
+    // until they actually configure something.
+    if (!state.proteinRarity) state.proteinRarity = {};
+    state._v = 3;
     return state;
   },
 };

@@ -2,6 +2,7 @@
 // used by menu.js. No AI here; this is the deterministic half of menu generation.
 
 import { currentCycle } from './cycles.js';
+import { api } from './api.js';
 
 function uid(prefix) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -52,12 +53,86 @@ export function checkRecipeAgainstProfiles(recipe, profiles) {
   return { allowed: true, deprioritized: hasFlexibleConflict };
 }
 
-// Given the full library + active profiles, return the valid candidate pool
-// (intersection of every active profile's constraints), sorted so
-// less-recently-used and non-deprioritized recipes come first.
-export function getCandidatePool(recipes, profiles, recentTitles = []) {
-  const pool = recipes
-    .map((r) => ({ recipe: r, check: checkRecipeAgainstProfiles(r, profiles) }))
+// --- Protein rarity -------------------------------------------------------
+// Global (not per-profile) suggestion-frequency control for proteins that
+// are rare/expensive/hard to get (lamb, swordfish, etc.) \u2014 configured via
+// the Recipes tab. This is a cost/availability control, not a taste rule,
+// which is why it lives here rather than in Profile.restrictions.
+
+// Scans every cycle ever created for the most recent date this protein was
+// actually cooked, so "less than once a quarter" checks real history, not
+// just the current week.
+export function proteinLastUsedDate(state, protein) {
+  let latest = null;
+  (state.cycles || []).forEach((cyc) => {
+    cyc.days.forEach((day) => {
+      ['breakfast', 'lunch', 'dinner'].forEach((slotType) => {
+        const result = day.slots?.[slotType]?.result;
+        if (!result?.recipeId) return;
+        const rec = (state.recipes || []).find((x) => x.id === result.recipeId);
+        if (!rec) return;
+        if ((rec.tags?.protein || '').toLowerCase().trim() === protein) {
+          if (!latest || day.date > latest) latest = day.date;
+        }
+      });
+    });
+  });
+  return latest;
+}
+
+export function daysSince(dateStr) {
+  if (!dateStr) return Infinity; // never used = as far in the past as possible
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const then = new Date(y, m - 1, d);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return Math.round((now - then) / 86400000);
+}
+
+// 'avoid' excludes outright (still fully assignable manually via Recipes).
+// 'rare' deprioritizes while inside its window \u2014 doesn't exclude, so it can
+// still surface as a last resort if nothing else fits.
+export function checkProteinAllowed(recipe, state) {
+  const protein = (recipe.tags?.protein || '').toLowerCase().trim();
+  if (!protein) return { allowed: true };
+  const rarity = (state.proteinRarity || {})[protein];
+  if (!rarity) return { allowed: true };
+
+  if (rarity.tier === 'avoid') {
+    return { allowed: false, reason: `"${protein}" is marked Avoid \u2014 assign it manually from the Recipes tab if you want it` };
+  }
+  if (rarity.tier === 'rare') {
+    const since = daysSince(proteinLastUsedDate(state, protein));
+    const window = rarity.windowDays || 90;
+    if (since < window) {
+      return { allowed: true, deprioritized: true, reason: `"${protein}" used ${since}d ago \u2014 inside its ${window}-day rare window` };
+    }
+  }
+  return { allowed: true };
+}
+
+// Given full app state + active profiles, return the valid candidate pool
+// (intersection of every active profile's constraints, plus protein-rarity
+// rules), sorted so less-recently-used and non-deprioritized recipes come
+// first. Takes `state` rather than just a recipes array because the protein
+// rarity check needs to scan cycle history for "when was this last used."
+export function getCandidatePool(state, profiles, recentTitles = []) {
+  const pool = (state.recipes || [])
+    .map((r) => {
+      const profileCheck = checkRecipeAgainstProfiles(r, profiles);
+      if (!profileCheck.allowed) return { recipe: r, check: profileCheck };
+      const proteinCheck = checkProteinAllowed(r, state);
+      if (!proteinCheck.allowed) return { recipe: r, check: { allowed: false, reason: proteinCheck.reason } };
+      return {
+        recipe: r,
+        check: {
+          allowed: true,
+          // merge both signals \u2014 a recipe can be deprioritized for texture
+          // reasons AND for protein-rarity reasons at once
+          deprioritized: !!(profileCheck.deprioritized || proteinCheck.deprioritized),
+        },
+      };
+    })
     .filter((x) => x.check.allowed);
 
   return pool
@@ -214,7 +289,32 @@ export function renderRecipes(state, container, { saveState, toast }) {
     </div>`;
   }
 
+  const proteins = [...new Set(recipes.map((r) => r.tags?.protein?.toLowerCase().trim()).filter(Boolean))].sort();
+  if (proteins.length) {
+    html += `<div class="card">
+      <h3>Protein rarity</h3>
+      <div class="meta">For proteins that are rare, expensive, or hard to get \u2014 not a taste preference, a shopping-reality control. "Rare" still gets suggested once it's been long enough since you last cooked it; "Avoid" never auto-suggests but you can always assign it manually.</div>
+      ${proteins.map((p) => {
+        const rarity = (state.proteinRarity || {})[p];
+        const tier = rarity?.tier || 'none';
+        const window = rarity?.windowDays || 90;
+        return `<div class="checklist-row" data-protein="${p}" style="flex-wrap:wrap;">
+          <span>${p}</span>
+          <div style="display:flex; gap:0.3rem; align-items:center; flex-wrap:wrap;">
+            <div class="choice-row rarity-row" data-protein="${p}">
+              <button type="button" class="choice-chip rarity-chip ${tier === 'none' ? 'selected' : ''}" data-tier="none">No restriction</button>
+              <button type="button" class="choice-chip rarity-chip ${tier === 'rare' ? 'selected' : ''}" data-tier="rare">Rare</button>
+              <button type="button" class="choice-chip rarity-chip ${tier === 'avoid' ? 'selected' : ''}" data-tier="avoid">Avoid</button>
+            </div>
+            ${tier === 'rare' ? `<input type="number" class="rarity-window-input" data-protein="${p}" value="${window}" min="7" max="365" style="width:4.5rem; padding:0.3rem;"> days</span>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
   const visibleRecipes = activeCuisineFilter ? recipes.filter((r) => r.tags?.cuisine === activeCuisineFilter) : recipes;
+
 
   if (!recipes.length) {
     html += `<div class="empty-state">No recipes yet. Add one, or import your starter JSON from Settings.</div>`;
@@ -241,6 +341,37 @@ export function renderRecipes(state, container, { saveState, toast }) {
     chip.addEventListener('click', () => {
       activeCuisineFilter = chip.dataset.cuisine || null;
       renderRecipes(state, container, { saveState, toast });
+    });
+  });
+
+  state.proteinRarity = state.proteinRarity || {};
+  container.querySelectorAll('.rarity-row').forEach((row) => {
+    row.querySelectorAll('.rarity-chip').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const protein = row.dataset.protein;
+        const tier = chip.dataset.tier;
+        if (tier === 'none') {
+          delete state.proteinRarity[protein];
+        } else if (tier === 'avoid') {
+          state.proteinRarity[protein] = { tier: 'avoid' };
+        } else {
+          const existingWindow = state.proteinRarity[protein]?.windowDays || 90;
+          state.proteinRarity[protein] = { tier: 'rare', windowDays: existingWindow };
+        }
+        saveState();
+        renderRecipes(state, container, { saveState, toast });
+      });
+    });
+  });
+  container.querySelectorAll('.rarity-window-input').forEach((input) => {
+    input.addEventListener('change', () => {
+      const protein = input.dataset.protein;
+      const days = Math.max(7, Math.min(365, Number(input.value) || 90));
+      if (state.proteinRarity[protein]?.tier === 'rare') {
+        state.proteinRarity[protein].windowDays = days;
+        saveState();
+        toast(`"${protein}" rare window set to ${days} days`);
+      }
     });
   });
 
@@ -291,6 +422,11 @@ function renderRecipeView(state, container, recipe, { saveState, toast }) {
       ${['leftoverFriendly', 'eatFresh', 'batchable', 'vegHidden'].filter((k) => recipe.tags?.[k]).length ? `
         <div class="meta" style="margin-top:0.4rem;">${['leftoverFriendly', 'eatFresh', 'batchable', 'vegHidden'].filter((k) => recipe.tags?.[k]).map((k) => `[${k}]`).join(' ')}</div>
       ` : ''}
+      <div style="margin-top:0.6rem; display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+        <input type="text" id="substitute-protein-input" placeholder="e.g. ground beef, chicken thighs..." style="flex:1; min-width:10rem;">
+        <button class="btn secondary small" id="substitute-protein-btn">Substitute Protein</button>
+      </div>
+      <div class="meta" id="substitute-status" style="margin-top:0.3rem;"></div>
     </div>
 
     <div class="card">
@@ -338,6 +474,43 @@ function renderRecipeView(state, container, recipe, { saveState, toast }) {
 
   container.querySelector('#back-to-list-btn').addEventListener('click', () => {
     renderRecipes(state, container, { saveState, toast });
+  });
+
+  container.querySelector('#substitute-protein-btn').addEventListener('click', async () => {
+    const newProtein = container.querySelector('#substitute-protein-input').value.trim();
+    if (!newProtein) { toast('Type a protein to substitute in'); return; }
+
+    const btn = container.querySelector('#substitute-protein-btn');
+    const statusEl = container.querySelector('#substitute-status');
+    btn.textContent = 'Rewriting recipe...';
+    btn.disabled = true;
+    statusEl.textContent = '';
+
+    const detail = await api.getProteinSubstitution({ recipe, newProtein });
+
+    if (!detail || !detail.title) {
+      statusEl.textContent = 'Could not rewrite this recipe \u2014 check js/api.js\u2019s ENDPOINT and the console, then try again.';
+      statusEl.style.color = 'var(--danger)';
+      btn.textContent = 'Substitute Protein';
+      btn.disabled = false;
+      return;
+    }
+
+    // Overwrite in place \u2014 same id, same createdAt/source/rejectedCount, everything
+    // else replaced with the rewritten version.
+    Object.assign(recipe, {
+      title: detail.title,
+      tags: detail.tags || recipe.tags,
+      totalTimeMinutes: detail.totalTimeMinutes ?? recipe.totalTimeMinutes,
+      reasonInRotation: detail.reasonInRotation ?? recipe.reasonInRotation,
+      ingredients: detail.ingredients || [],
+      sauce: detail.sauce || [],
+      steps: detail.steps || [],
+      closingNote: detail.closingNote ?? null,
+    });
+    saveState();
+    toast(`Recipe updated: "${detail.title}"`);
+    renderRecipeView(state, container, recipe, { saveState, toast });
   });
 
   container.querySelectorAll('.serving-chip').forEach((chip) => {

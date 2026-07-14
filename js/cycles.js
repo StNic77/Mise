@@ -147,6 +147,7 @@ export function newCycle(startDateStr, endDateStr) {
     cuisineWeighting: {},
     cuisinePriorityOrder: [],
     cuisineTiedWithNext: [],
+    onHandNote: '',
     days,
   };
 }
@@ -223,6 +224,13 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
         `).join('')}
       </div>
     ` : ''}
+  </div>`;
+
+  cycle.onHandNote = cycle.onHandNote || '';
+  html += `<div class="card">
+    <h3>What's on hand?</h3>
+    <div class="meta">Optional. Type it in your own words \u2014 "leftover rotisserie chicken, some lettuce, tortillas, tomatoes." The AI will lean on this for a couple of ideas where it fits naturally, but won't limit the whole list to just these items.</div>
+    <textarea id="on-hand-note" placeholder="e.g. leftover rotisserie chicken, half a bag of spinach, a block of feta...">${escapeHtml(cycle.onHandNote)}</textarea>
   </div>`;
 
   html += `<div class="card">
@@ -383,6 +391,14 @@ export function renderCycleSetup(state, container, { saveState, toast, onMenuRea
   container.querySelector('#generate-menu-btn').addEventListener('click', () => {
     onMenuReady(cycle);
   });
+
+  const onHandInput = container.querySelector('#on-hand-note');
+  if (onHandInput) {
+    onHandInput.addEventListener('change', () => {
+      cycle.onHandNote = onHandInput.value.trim();
+      saveState();
+    });
+  }
 
   const aiIdeasBtn = container.querySelector('#get-ai-ideas-btn');
   if (aiIdeasBtn && onGetAiIdeas) {

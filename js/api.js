@@ -77,13 +77,15 @@ export const api = {
   // Returns a full Recipe-shaped object (matching DATA-MODEL.md) or null
   // if the call/parse failed — caller must fall back to a rules-based pick.
   // ---------------------------------------------------------------------
-  async getRecipeSuggestion({ cuisineWeighting, activeProfiles, recentTitles }) {
+  async getRecipeSuggestion({ cuisineWeighting, activeProfiles, recentTitles, proteinConstraints, onHandNote }) {
     const system = `You are a recipe suggestion service inside a personal meal-planning app called Mise.
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 Suggest ONE dinner recipe that fits the constraints given. It should feel like a genuine
 new idea, not a copy of something already in recent rotation.
 Respect every profile's restrictions as hard constraints — never include an ingredient
-listed as a strict avoid for any active profile.`;
+listed as a strict avoid for any active profile.
+${proteinConstraints ? `\n${proteinConstraints}\nTreat any protein marked AVOID or inside its rare window as off-limits for this suggestion.` : ''}
+${onHandNote ? `\nThe user mentioned having this on hand: "${onHandNote}". If it fits naturally, feel free to build this suggestion around it \u2014 but don't force it if it doesn't fit the cuisine/profile constraints.` : ''}`;
 
     const profileText = (activeProfiles || [])
       .map((p) => {
@@ -217,13 +219,15 @@ Return JSON:
   // ingredients/steps yet) matching this week's weighting/profiles. Used to
   // let the user browse and pick before paying for full detail on each.
   // ---------------------------------------------------------------------
-  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles }) {
+  async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, proteinConstraints, onHandNote }) {
     const system = `You are a dinner idea generator inside a personal meal-planning app called Mise.
 Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
 Suggest ${count} distinct dinner ideas fitting the cuisine weighting and profile constraints given.
 Keep each idea short — title + one line — this is a browsing list, not a full recipe.
 Respect every profile's strict avoids as hard constraints. Vary proteins and textures across
-the set rather than repeating the same protein in every idea.`;
+the set rather than repeating the same protein in every idea.
+${proteinConstraints ? `\n${proteinConstraints}\nTreat any protein marked AVOID or inside its rare window as off-limits \u2014 don't include it in any idea.` : ''}
+${onHandNote ? `\nThe user mentioned having this on hand: "${onHandNote}". Use it as inspiration for ONE OR TWO of the ${count} ideas where it fits naturally \u2014 do NOT restrict the whole batch to only these items. The rest of the ideas should still be a broad, varied mix as usual.` : ''}`;
 
     const profileText = (activeProfiles || [])
       .map((p) => {
@@ -352,6 +356,54 @@ Return JSON:
       return parsed;
     } catch (e) {
       console.error('getConsolidatedGroceryList failed', e);
+      return null;
+    }
+  },
+
+  // ---------------------------------------------------------------------
+  // getProteinSubstitution — rewrites an existing recipe with a different
+  // primary protein, keeping the same dish concept/cuisine/style. Used by
+  // the Recipes tab's "Substitute Protein" button. Overwrites the recipe
+  // in place (same id) — caller is responsible for actually replacing it
+  // in state.recipes once this returns.
+  // ---------------------------------------------------------------------
+  async getProteinSubstitution({ recipe, newProtein }) {
+    const system = `You are helping substitute the primary protein in an existing recipe, inside a
+personal meal-planning app called Mise.
+Return ONLY valid JSON. No preamble, no explanation, no markdown fences.
+Keep the same dish concept, cuisine, and cooking style — just swap the protein and adjust
+ingredients, quantities, and steps as needed for the new protein. Update the title to reflect
+the new protein. Keep it realistic and cookable, not a totally different dish.`;
+
+    const messages = [{
+      role: 'user',
+      content: `Original recipe:
+${JSON.stringify(recipe, null, 2)}
+
+Substitute the primary protein (currently "${recipe.tags?.protein || 'unspecified'}") with: "${newProtein}".
+
+Return JSON matching this shape exactly:
+{
+  "title": "string",
+  "tags": { "cuisine": "string", "protein": "string", "texture": "string", "leftoverFriendly": true, "eatFresh": false, "batchable": false, "vegHidden": false },
+  "totalTimeMinutes": number,
+  "reasonInRotation": "string, one line",
+  "ingredients": [ { "name": "string", "amount1": "string", "amount2": "string", "amount4": "string" } ],
+  "sauce": [ { "name": "string", "amount1": "string", "scaleNote": "string or null" } ],
+  "steps": [ { "text": "string", "timeMinutes": number or null } ],
+  "closingNote": "string or null"
+}`,
+    }];
+
+    try {
+      const raw = await this.send({ system, messages, maxTokens: 1600, model: MODEL_FAST });
+      const parsed = safeParseJSON(raw);
+      if (parsed && !parsed.title) {
+        console.warn('[Mise] getProteinSubstitution: JSON parsed fine but has no "title" field. Parsed result:', parsed);
+      }
+      return parsed;
+    } catch (e) {
+      console.error('getProteinSubstitution failed', e);
       return null;
     }
   },

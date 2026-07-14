@@ -4,11 +4,29 @@
 // AI-generated slot (via api.js) for novelty.
 
 import { api } from './api.js';
-import { getCandidatePool, pickWeighted } from './recipes.js';
+import { getCandidatePool, pickWeighted, proteinLastUsedDate, daysSince } from './recipes.js';
 
 function uid(prefix) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
+
+// Builds a plain-English constraint block to inject into AI prompts, so
+// AI-generated dish ideas/suggestions respect the same protein-rarity rules
+// as the rules engine (recipes.js's getCandidatePool) \u2014 otherwise the AI
+// would happily keep suggesting swordfish even with Avoid set.
+export function buildProteinConstraintText(state) {
+  const entries = Object.entries(state.proteinRarity || {});
+  if (!entries.length) return '';
+  const lines = entries.map(([protein, rarity]) => {
+    if (rarity.tier === 'avoid') return `- ${protein}: AVOID entirely, do not suggest.`;
+    const since = daysSince(proteinLastUsedDate(state, protein));
+    const window = rarity.windowDays || 90;
+    if (since < window) return `- ${protein}: used ${since} day(s) ago, still inside its ${window}-day rare window \u2014 do not suggest.`;
+    return `- ${protein}: rare ingredient, fine to suggest occasionally (last used ${since === Infinity ? 'never' : since + ' day(s) ago'}, outside its ${window}-day window).`;
+  });
+  return `Protein frequency constraints (real cost/availability limits, not taste preferences):\n${lines.join('\n')}`;
+}
+
 
 const NOVELTY_AI_CHANCE = 0.2; // ~1 in 5 dinner slots offers an AI suggestion instead of a library pick
 
@@ -53,7 +71,7 @@ export async function generateMenu(state, cycle, { saveState, toast, aiEnabled }
     if (!day.activeProfileIds.length) continue; // nobody's eating this night \u2014 nothing to generate for
 
     const profiles = activeProfilesFor(state, day);
-    const pool = getCandidatePool(state.recipes, profiles, recent);
+    const pool = getCandidatePool(state, profiles, recent);
 
     const tryAi = aiEnabled && Math.random() < NOVELTY_AI_CHANCE;
     let assigned = false;
@@ -64,6 +82,8 @@ export async function generateMenu(state, cycle, { saveState, toast, aiEnabled }
         cuisineWeighting: cycle.cuisineWeighting,
         activeProfiles: profiles,
         recentTitles: recent,
+        proteinConstraints: buildProteinConstraintText(state),
+        onHandNote: cycle.onHandNote,
       });
       if (suggestion && suggestion.title) {
         const tempRecipe = {
@@ -116,7 +136,7 @@ export function swapNight(state, cycle, day, { saveState, toast }) {
   }
   if (currentTitle) recent.push(currentTitle);
 
-  const pool = getCandidatePool(state.recipes, profiles, recent).filter(
+  const pool = getCandidatePool(state, profiles, recent).filter(
     (r) => r.id !== day.slots.dinner.result?.recipeId
   );
 

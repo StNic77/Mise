@@ -63,10 +63,11 @@ a { color: var(--accent); }
   margin-top: 0.15rem;
 }
 
-#tabs {
+#tab-bar {
   display: flex;
   gap: 0.25rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   padding: 0.5rem 1rem 0;
   background: var(--surface-raised);
   border-bottom: 1px solid var(--line);
@@ -80,6 +81,7 @@ a { color: var(--accent); }
   color: var(--ink-muted);
   border-bottom: 2px solid transparent;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab-btn.active {
@@ -88,12 +90,13 @@ a { color: var(--accent); }
   font-weight: 600;
 }
 
-#app-main {
+#tab-content {
   flex: 1;
   padding: 1rem 1.25rem 6rem;
   max-width: 720px;
   width: 100%;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 /* ---- Cards ---- */
@@ -280,17 +283,27 @@ a { color: var(--accent); }
   justify-content: center;
 }
 
-.toast {
+#toast {
   position: fixed;
   bottom: 4.5rem;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateY(0.5rem);
   background: var(--ink);
   color: #fff;
   padding: 0.6rem 1rem;
   border-radius: var(--radius);
   font-size: 0.85rem;
   z-index: 100;
+  max-width: calc(100vw - 2rem);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 /* ---- Added for cycles/mealslots/shoppinglist screens ---- */
@@ -413,4 +426,73 @@ a { color: var(--accent); }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font-size: 0.9rem;
+}
+
+/* ---- Mobile-specific fixes ---- */
+/* Prevent any input/select/textarea from overflowing its card on narrow
+   screens \u2014 box-sizing is global but width:100% + padding needs this too. */
+input, select, textarea {
+  max-width: 100%;
+}
+
+@media (max-width: 480px) {
+  #app-header {
+    padding: 0.75rem 1rem 0.6rem;
+  }
+
+  #tab-content {
+    padding: 0.75rem 0.75rem 6rem;
+  }
+
+  .card {
+    padding: 0.85rem;
+  }
+
+  /* Shopping list: the tap-row (checkbox+name+qty) and the actions-row
+     (price+edit+delete) were fighting for one line and visually overlapping
+     on narrow screens. Stack them instead \u2014 full width each, actions row
+     right-aligned underneath. */
+  .shopping-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.4rem;
+  }
+
+  .shopping-item-tap {
+    width: 100%;
+  }
+
+  .item-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .price-input {
+    width: 3.75rem;
+  }
+
+  /* Day/slot cards: the four-chip Plan/Skip/Eating-out/Special row plus the
+     who's-present row can get tight side by side with small labels \u2014 give
+     chips a little more breathing room and let them wrap freely. */
+  .choice-chip {
+    padding: 0.4rem 0.65rem;
+    font-size: 0.82rem;
+  }
+
+  .checklist-row {
+    flex-wrap: wrap;
+  }
+
+  .mark-row,
+  .rarity-row {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  /* Button rows (multiple buttons in a flex row) should wrap rather than
+     compress or overflow the card horizontally. */
+  .card > div[style*="display:flex"] {
+    flex-wrap: wrap;
+  }
 }

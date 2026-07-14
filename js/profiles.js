@@ -121,7 +121,7 @@ function openProfileEditor(state, container, profile, { saveState, toast }) {
       </div>
 
       <div class="field"><label>7. Cuisines they enjoy (this also drives menu weighting)</label>
-        ${chipRow('f-cuisine', CUISINE_OPTIONS, profile.cuisineLikes, true)}
+        ${chipRow('f-cuisine', [...new Set([...CUISINE_OPTIONS, ...(profile.cuisineLikes || [])])], profile.cuisineLikes, true)}
         <input type="text" id="f-cuisine-other" placeholder="Other cuisine, comma separated" style="margin-top:0.4rem;">
       </div>
 
@@ -205,6 +205,15 @@ function openProfileEditor(state, container, profile, { saveState, toast }) {
     }
     saveState();
     openProfileEditor(state, container, profile, { saveState, toast }); // re-render with new note
+  });
+
+  container.querySelectorAll('.remove-note-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.idx);
+      profile.aiNotes.splice(idx, 1);
+      saveState();
+      openProfileEditor(state, container, profile, { saveState, toast });
+    });
   });
 
   function getSelected(rowId, multi) {
