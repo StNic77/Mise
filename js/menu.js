@@ -165,6 +165,32 @@ function isAlwaysStocked(name) {
   return ALWAYS_STOCKED_KEYWORDS.some((k) => n.includes(k));
 }
 
+// Fallback keyword list used only when a recipe has no protein tag to go on.
+// Deliberately broader than the old list (which was missing lamb, turkey,
+// bacon/sausage, shrimp/prawn, tuna, steak, and common cut words like
+// "shoulder"/"loin"/"chop") \u2014 this is what caused "lamb shoulder, bone in"
+// to fall through to the produce bucket.
+const MEAT_KEYWORDS = [
+  'pork', 'beef', 'chicken', 'lamb', 'turkey', 'duck', 'bacon', 'sausage',
+  'fish', 'salmon', 'tuna', 'shrimp', 'prawn', 'shellfish', 'tofu',
+  'thigh', 'breast', 'belly', 'shoulder', 'loin', 'chop', 'steak', 'mince',
+  'ground beef', 'ground pork', 'ground turkey',
+];
+
+function isMeatIngredient(ing, recipe) {
+  const ingName = ing.name.toLowerCase();
+  // Prefer the recipe's own protein tag \u2014 it's already known and correct
+  // (set when the recipe was created/edited), rather than re-guessing from
+  // ingredient text every time. Only the ingredient line that actually
+  // mentions the tagged protein counts as the "meat" line; other lines in
+  // the same recipe (veg, rice, etc.) still fall through to the keyword
+  // check below.
+  const protein = (recipe?.tags?.protein || '').toLowerCase().trim();
+  if (protein && ingName.includes(protein)) return true;
+  if (/egg\b/i.test(ingName)) return false; // eggs are a Tier-1 staple, excluded above already, but keep this explicit
+  return MEAT_KEYWORDS.some((k) => ingName.includes(k));
+}
+
 export function reverseMenuToGroceryLines(state, cycle) {
   // Keyed by normalized name so exact-match repeats (the same ingredient
   // string used by more than one recipe/night) collapse into one line
@@ -185,8 +211,7 @@ export function reverseMenuToGroceryLines(state, cycle) {
       const servingsKey = slot.result.servings === 1 ? 'amount1' : slot.result.servings >= 4 ? 'amount4' : 'amount2';
       [...(recipe.ingredients || []), ...(recipe.sauce || [])].forEach((ing) => {
         if (isAlwaysStocked(ing.name)) return;
-        const isMeat = /pork|beef|chicken|fish|salmon|shrimp|tofu|egg|thigh|belly/i.test(ing.name)
-          && !/egg\b/i.test(ing.name); // eggs already excluded as staple above, but keep this readable
+        const isMeat = isMeatIngredient(ing, recipe);
         const quantity = ing[servingsKey] || ing.amount1 || '';
         const key = ing.name.trim().toLowerCase().replace(/\s+/g, ' ');
 

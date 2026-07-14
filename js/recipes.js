@@ -11,7 +11,7 @@ function uid(prefix) {
 // Persists across re-renders of this tab (module-level, resets on page reload)
 // so the filter stays put while you're adding/editing/assigning recipes.
 let activeCuisineFilter = null;
-let proteinSearchTerm = '';
+let recipeSearchTerm = '';
 
 // Does this recipe violate any active profile's restrictions?
 // strict -> excluded outright. flexible -> allowed but flagged (caller can deprioritize).
@@ -244,17 +244,51 @@ function normalizeImportedRecipe(raw) {
   };
 }
 
+// Share-safe shape: strips fields that are meaningless (or mildly private,
+// like exact createdAt timestamps) to a recipient \u2014 id, createdAt, source,
+// and rejectedCount are all this app's own internal bookkeeping, not part of
+// the recipe itself. The importer already assigns a fresh id/createdAt/
+// source on the way in (see normalizeImportedRecipe), so none of this is lost.
+function toShareSafeRecipe(r) {
+  return {
+    title: r.title,
+    tags: r.tags,
+    totalTimeMinutes: r.totalTimeMinutes,
+    reasonInRotation: r.reasonInRotation,
+    ingredients: r.ingredients,
+    sauce: r.sauce,
+    steps: r.steps,
+    closingNote: r.closingNote,
+  };
+}
+
+function downloadRecipesJson(recipes) {
+  const payload = { recipes: recipes.map(toShareSafeRecipe) };
+  const json = JSON.stringify(payload, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `mise-recipes-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function openImportPanel(state, container, { saveState, toast }) {
   container.innerHTML = `
     <div class="card">
       <h3>Import Recipe(s) from JSON</h3>
-      <div class="meta">Paste JSON here \u2014 from a recipe photo or text you had a separate Claude
-        chat convert, or anything matching Mise's recipe shape. Accepts one recipe object, or
-        <code>{"recipes": [...]}</code> for several at once. See DATA-MODEL.md for the exact shape,
-        or just ask Claude: "turn this recipe into JSON for my Mise app" and paste a photo/text.</div>
+      <div class="meta">Pick a file exported from another Mise (via "Export Recipes"), or paste JSON
+        directly \u2014 from a recipe photo or text you had a separate Claude chat convert, or anything
+        matching Mise's recipe shape. Accepts one recipe object, or <code>{"recipes": [...]}</code>
+        for several at once. See DATA-MODEL.md for the exact shape, or just ask Claude: "turn this
+        recipe into JSON for my Mise app" and paste a photo/text.</div>
+      <button class="btn secondary small" id="import-file-pick-btn" style="margin-bottom:0.6rem;">Choose file...</button>
+      <input type="file" id="import-recipe-file-input" accept="application/json" style="display:none;">
+      <div class="meta" style="margin:0.4rem 0;">\u2014 or paste JSON \u2014</div>
       <textarea id="import-json-textarea" style="min-height:10rem;" placeholder='{"title": "...", "tags": {...}, "ingredients": [...], "steps": [...]}'></textarea>
       <div style="display:flex; gap:0.5rem; margin-top:0.5rem;">
-        <button class="btn" id="do-import-btn">Import</button>
+        <button class="btn" id="do-import-btn">Import pasted JSON</button>
         <button class="btn secondary" id="cancel-import-btn">Cancel</button>
       </div>
     </div>
@@ -264,8 +298,7 @@ function openImportPanel(state, container, { saveState, toast }) {
     renderRecipes(state, container, { saveState, toast });
   });
 
-  container.querySelector('#do-import-btn').addEventListener('click', () => {
-    const text = container.querySelector('#import-json-textarea').value.trim();
+  function importFromRawText(text) {
     if (!text) return;
     let parsed;
     try {
@@ -286,6 +319,20 @@ function openImportPanel(state, container, { saveState, toast }) {
     saveState();
     toast(`Imported ${validList.length} recipe(s)`);
     renderRecipes(state, container, { saveState, toast });
+  }
+
+  container.querySelector('#do-import-btn').addEventListener('click', () => {
+    importFromRawText(container.querySelector('#import-json-textarea').value.trim());
+  });
+
+  container.querySelector('#import-file-pick-btn').addEventListener('click', () => {
+    container.querySelector('#import-recipe-file-input').click();
+  });
+  container.querySelector('#import-recipe-file-input').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    importFromRawText(text.trim());
   });
 }
 
@@ -298,8 +345,10 @@ export function renderRecipes(state, container, { saveState, toast }) {
   let html = `<div class="card">
     <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
       <button class="btn" id="add-recipe-btn">+ Add Recipe</button>
-      <button class="btn secondary" id="import-recipe-btn">Import Recipe (JSON)</button>
+      <button class="btn secondary" id="import-recipe-btn">Import Recipe(s) (JSON)</button>
+      <button class="btn secondary" id="export-recipes-btn">Export Recipes (JSON)</button>
     </div>
+    <div class="meta" style="margin-top:0.4rem;">Export saves a share-safe file \u2014 recipes only, no profiles or meal history \u2014 you can hand to anyone to import into their own Mise.</div>
   </div>`;
 
   if (cuisines.length) {
@@ -316,8 +365,9 @@ export function renderRecipes(state, container, { saveState, toast }) {
   }
 
   html += `<div class="card">
-    <h3>Search by protein</h3>
-    <input type="text" id="protein-search-input" placeholder="e.g. chicken, pork, tofu..." value="${escapeAttr(proteinSearchTerm)}">
+    <h3>Search</h3>
+    <div class="meta">Matches title, protein, or any ingredient \u2014 try "lemon", "gochujang", "sirloin".</div>
+    <input type="text" id="recipe-search-input" placeholder="e.g. chicken, lemon, gochujang..." value="${escapeAttr(recipeSearchTerm)}">
   </div>`;
 
   const detectedProteins = recipes.map((r) => r.tags?.protein?.toLowerCase().trim()).filter(Boolean);
@@ -352,9 +402,21 @@ export function renderRecipes(state, container, { saveState, toast }) {
     </details>
   </div>`;
 
+  function recipeMatchesSearch(r, term) {
+    if (!term) return true;
+    const t = term.toLowerCase();
+    if ((r.title || '').toLowerCase().includes(t)) return true;
+    if ((r.tags?.protein || '').toLowerCase().includes(t)) return true;
+    const ingredientNames = [
+      ...(r.ingredients || []).map((i) => i.name),
+      ...(r.sauce || []).map((s) => s.name),
+    ].join(' ').toLowerCase();
+    return ingredientNames.includes(t);
+  }
+
   const visibleRecipes = recipes
     .filter((r) => !activeCuisineFilter || r.tags?.cuisine === activeCuisineFilter)
-    .filter((r) => !proteinSearchTerm || (r.tags?.protein || '').toLowerCase().includes(proteinSearchTerm.toLowerCase()));
+    .filter((r) => recipeMatchesSearch(r, recipeSearchTerm));
 
 
   if (!recipes.length) {
@@ -362,7 +424,7 @@ export function renderRecipes(state, container, { saveState, toast }) {
   } else if (!visibleRecipes.length) {
     const filterDescriptions = [];
     if (activeCuisineFilter) filterDescriptions.push(`cuisine "${activeCuisineFilter.replace(/_/g, ' ')}"`);
-    if (proteinSearchTerm) filterDescriptions.push(`protein matching "${proteinSearchTerm}"`);
+    if (recipeSearchTerm) filterDescriptions.push(`"${recipeSearchTerm}"`);
     html += `<div class="empty-state">No recipes match ${filterDescriptions.join(' and ')}.</div>`;
   } else {
     for (const r of visibleRecipes) {
@@ -388,12 +450,12 @@ export function renderRecipes(state, container, { saveState, toast }) {
     });
   });
 
-  const proteinSearchInput = container.querySelector('#protein-search-input');
-  if (proteinSearchInput) {
-    proteinSearchInput.addEventListener('input', () => {
-      proteinSearchTerm = proteinSearchInput.value;
+  const recipeSearchInput = container.querySelector('#recipe-search-input');
+  if (recipeSearchInput) {
+    recipeSearchInput.addEventListener('input', () => {
+      recipeSearchTerm = recipeSearchInput.value;
       renderRecipes(state, container, { saveState, toast });
-      const newInput = container.querySelector('#protein-search-input');
+      const newInput = container.querySelector('#recipe-search-input');
       if (newInput) {
         newInput.focus();
         newInput.setSelectionRange(newInput.value.length, newInput.value.length);
@@ -472,6 +534,11 @@ export function renderRecipes(state, container, { saveState, toast }) {
   });
   container.querySelector('#import-recipe-btn').addEventListener('click', () => {
     openImportPanel(state, container, { saveState, toast });
+  });
+  container.querySelector('#export-recipes-btn').addEventListener('click', () => {
+    if (!recipes.length) { toast('No recipes to export yet'); return; }
+    downloadRecipesJson(recipes);
+    toast(`Exported ${recipes.length} recipe(s)`);
   });
   container.querySelectorAll('.edit-recipe-btn').forEach((btn) => {
     btn.addEventListener('click', () => {

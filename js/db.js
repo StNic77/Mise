@@ -6,7 +6,7 @@
 const DB_NAME = 'mise-db';
 const DB_STORE = 'state';
 const STATE_KEY = 'app-state';
-const CURRENT_SCHEMA_VERSION = 5;
+const CURRENT_SCHEMA_VERSION = 6;
 
 function emptyState() {
   return {
@@ -160,6 +160,25 @@ const migrations = {
       }
     });
     state._v = 5;
+    return state;
+  },
+  5: (state) => {
+    // v6: the v5 migration normalized recipe tags but missed
+    // Profile.cuisineLikes / cuisineDislikes \u2014 those are plain free-text
+    // string arrays (from the wizard's "Other cuisine" field, saved as-typed
+    // before that field's lowercasing existed), so "Mediterranean" and
+    // "mediterranean" could both exist there and show up as two separate
+    // chips in the cuisine-weighting picker. Normalize + dedupe both arrays
+    // on every profile, retroactively.
+    (state.profiles || []).forEach((p) => {
+      if (Array.isArray(p.cuisineLikes)) {
+        p.cuisineLikes = [...new Set(p.cuisineLikes.map((c) => String(c).trim().toLowerCase()))];
+      }
+      if (Array.isArray(p.cuisineDislikes)) {
+        p.cuisineDislikes = [...new Set(p.cuisineDislikes.map((c) => String(c).trim().toLowerCase()))];
+      }
+    });
+    state._v = 6;
     return state;
   },
 };

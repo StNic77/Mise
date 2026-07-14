@@ -46,9 +46,11 @@ export function renderProfiles(state, container, { saveState, toast }) {
     html += `<div class="empty-state">No profiles yet. Add yourself first, or import your starter JSON from Settings.</div>`;
   } else {
     for (const p of profiles) {
+      const noteCount = (p.aiNotes || []).length;
       html += `<div class="card">
         <h3>${escapeHtml(p.name || '(unnamed)')}</h3>
-        <div class="meta">${escapeHtml(p.dietType || 'not set')} · texture: ${escapeHtml(p.textureLikes || '—')} · restrictions: ${p.restrictions.length}</div>
+        <div class="meta">${escapeHtml(p.dietType || 'not set')} · texture: ${escapeHtml(p.textureLikes || '—')} · restrictions: ${p.restrictions.length} · AI notes: ${noteCount}</div>
+        ${noteCount ? `<div class="meta" style="margin-top:0.3rem;">${p.aiNotes.map((n) => `"${escapeHtml(n.text)}"`).join(' · ')}</div>` : ''}
         <div style="margin-top:0.5rem; display:flex; gap:0.4rem;">
           <button class="btn secondary small edit-profile-btn" data-id="${p.id}">Edit</button>
           <button class="btn danger small delete-profile-btn" data-id="${p.id}">Delete</button>
@@ -121,7 +123,10 @@ function openProfileEditor(state, container, profile, { saveState, toast }) {
       </div>
 
       <div class="field"><label>7. Cuisines they enjoy (this also drives menu weighting)</label>
-        ${chipRow('f-cuisine', [...new Set([...CUISINE_OPTIONS, ...(profile.cuisineLikes || [])])], profile.cuisineLikes, true)}
+        ${(() => {
+          const normalizedLikes = [...new Set((profile.cuisineLikes || []).map((c) => String(c).trim().toLowerCase()))];
+          return chipRow('f-cuisine', [...new Set([...CUISINE_OPTIONS, ...normalizedLikes])], normalizedLikes, true);
+        })()}
         <input type="text" id="f-cuisine-other" placeholder="Other cuisine, comma separated" style="margin-top:0.4rem;">
       </div>
 

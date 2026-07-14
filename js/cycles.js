@@ -159,9 +159,9 @@ export function currentCycle(state) {
 
 function allCuisineTags(state) {
   const set = new Set();
-  (state.recipes || []).forEach((r) => { if (r.tags?.cuisine) set.add(r.tags.cuisine); });
-  (state.profiles || []).forEach((p) => (p.cuisineLikes || []).forEach((c) => set.add(c)));
-  return [...set];
+  (state.recipes || []).forEach((r) => { if (r.tags?.cuisine) set.add(r.tags.cuisine.trim().toLowerCase()); });
+  (state.profiles || []).forEach((p) => (p.cuisineLikes || []).forEach((c) => set.add(String(c).trim().toLowerCase())));
+  return [...set].sort();
 }
 
 export function renderCycleSetup(state, container, { saveState, toast, onMenuReady, onNavigate, onGetAiIdeas, onRequestRecipe }) {

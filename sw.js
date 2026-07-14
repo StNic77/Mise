@@ -4,7 +4,7 @@
 // offline. Updates show up the moment you reload while online — no manual
 // version-bump ritual required (see README for the tradeoff this accepts).
 
-const CACHE_NAME = 'mise-cache-v5'; // bump this string if you ever want to force a clean cache
+const CACHE_NAME = 'mise-cache-v6'; // bump this string if you ever want to force a clean cache
 
 const APP_SHELL = [
   './',
