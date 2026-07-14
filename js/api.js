@@ -5,8 +5,10 @@
 //
 // SETUP: fill in your Worker's URL below before deploying.
 
-const MODEL_FAST = 'claude-sonnet-4-6';
-const MODEL_RICH = 'claude-opus-4-6';
+const MODEL_SONNET = 'claude-sonnet-5';   // recipe writing, idea batches — needs real culinary judgment
+const MODEL_HAIKU = 'claude-haiku-4-5-20251001';  // lightweight classification/extraction — cheap, plenty capable for these
+const MODEL_RICH = 'claude-opus-4-8';      // the one genuinely open-ended conversational call (Special date-night chat)
+const MODEL_FAST = MODEL_SONNET; // kept as an alias so send()'s default param doesn't need touching
 const MAX_TOKENS = 1000;
 const ENDPOINT = 'https://spring-rain-0f72.sstnicolaas.workers.dev'; // <-- confirm this is still current
 
@@ -167,7 +169,7 @@ Return JSON:
     }];
 
     try {
-      const raw = await this.send({ system, messages, maxTokens: 400, model: MODEL_FAST });
+      const raw = await this.send({ system, messages, maxTokens: 400, model: MODEL_HAIKU });
       return safeParseJSON(raw);
     } catch (e) {
       console.error('getMealSlotIdea failed', e);
@@ -220,7 +222,7 @@ Return JSON:
     }];
 
     try {
-      const raw = await this.send({ system, messages, maxTokens: 200, model: MODEL_FAST });
+      const raw = await this.send({ system, messages, maxTokens: 200, model: MODEL_HAIKU });
       return safeParseJSON(raw) || { isAvoidance: false, item: null, severity: null, noteText: freeText };
     } catch (e) {
       console.error('getProfileNote failed', e);
