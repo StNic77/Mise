@@ -5,8 +5,8 @@
 //
 // SETUP: fill in your Worker's URL below before deploying.
 
-const MODEL_SONNET = 'claude-sonnet-5';   // recipe writing, idea batches — needs real culinary judgment
-const MODEL_HAIKU = 'claude-haiku-4-5-20251001';  // lightweight classification/extraction — cheap, plenty capable for these
+const MODEL_SONNET = 'claude-sonnet-5';   // recipe writing, full detail calls — needs real culinary judgment
+const MODEL_HAIKU = 'claude-haiku-4-5-20251001';  // lightweight classification/extraction — cheap, plenty capable for these, AND stable tokenizer (unlike Sonnet 5 / Opus 4.7+, which run ~30% more tokens per response for the same content)
 const MODEL_RICH = 'claude-opus-4-8';      // the one genuinely open-ended conversational call (Special date-night chat)
 const MODEL_FAST = MODEL_SONNET; // kept as an alias so send()'s default param doesn't need touching
 const MAX_TOKENS = 1000;
@@ -234,6 +234,15 @@ Return JSON:
   // getRecipeIdeaBatch — lightweight, cheap: N short dish ideas (no full
   // ingredients/steps yet) matching this week's weighting/profiles. Used to
   // let the user browse and pick before paying for full detail on each.
+  //
+  // Routed to Haiku rather than MODEL_FAST: this is short structured output
+  // (title + one-liner per idea) — squarely in Haiku's "classification,
+  // routing, extraction, summarization" wheelhouse, not the kind of open-
+  // ended culinary judgment call that needs Sonnet. Also sidesteps a real
+  // bug: Sonnet 5's new tokenizer produces ~30% more output tokens for the
+  // same content, which was truncating this batch mid-JSON (safeParseJSON's
+  // repair salvaged only ~3 of the requested ideas). Haiku 4.5's tokenizer
+  // is stable across generations, so this budget holds.
   // ---------------------------------------------------------------------
   async getRecipeIdeaBatch({ cuisineWeighting, activeProfiles, count = 8, recentTitles, rarityConstraints, onHandNote, mealType = 'dinner' }) {
     const mealGuidance = {
@@ -271,8 +280,12 @@ Return JSON:
     }];
 
     try {
-      const raw = await this.send({ system, messages, maxTokens: 900, model: MODEL_FAST });
-      return safeParseJSON(raw);
+      const raw = await this.send({ system, messages, maxTokens: 1200, model: MODEL_HAIKU });
+      const parsed = safeParseJSON(raw);
+      if (parsed && Array.isArray(parsed.ideas) && parsed.ideas.length < count) {
+        console.warn(`[Mise] getRecipeIdeaBatch: requested ${count} ideas but only got ${parsed.ideas.length} back. This can happen if the response was still truncated \u2014 check the raw response above if it persists.`);
+      }
+      return parsed;
     } catch (e) {
       console.error('getRecipeIdeaBatch failed', e);
       return null;

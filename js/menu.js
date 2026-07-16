@@ -162,20 +162,49 @@ const ALWAYS_STOCKED_KEYWORDS = [
 
 function isAlwaysStocked(name) {
   const n = name.toLowerCase();
-  return ALWAYS_STOCKED_KEYWORDS.some((k) => n.includes(k));
+  // Word-boundary matched (see matchesAnyKeyword below, defined further down
+  // in this file) \u2014 plain .includes() let 'egg' match inside 'eggplant',
+  // silently treating it as an always-on-hand Tier-1 staple and dropping it
+  // from the grocery list entirely.
+  return matchesAnyKeyword(n, ALWAYS_STOCKED_KEYWORDS);
 }
 
 // Fallback keyword list used only when a recipe has no protein tag to go on.
 // Deliberately broader than the old list (which was missing lamb, turkey,
 // bacon/sausage, shrimp/prawn, tuna, steak, and common cut words like
-// "shoulder"/"loin"/"chop") \u2014 this is what caused "lamb shoulder, bone in"
+// "shoulder"/"loin") \u2014 this is what caused "lamb shoulder, bone in"
 // to fall through to the produce bucket.
+//
+// NOTE: bare 'chop' and 'mince' used to be in this list as substring
+// fragments, meant to catch cut-noun phrases like "pork chop" / "beef
+// mince". But matched via .includes() they also fired on prep-verb text
+// that has nothing to do with meat \u2014 "garlic cloves, minced" contains
+// "mince", "fresh dill or mint, chopped" contains "chop". Fixed by (a)
+// spelling out the actual cut-noun phrases we care about instead of the
+// bare fragment, and (b) matching everything here with word boundaries
+// (see matchesAnyKeyword below) so short tokens only match whole words,
+// not substrings buried inside an unrelated word.
 const MEAT_KEYWORDS = [
   'pork', 'beef', 'chicken', 'lamb', 'turkey', 'duck', 'bacon', 'sausage',
   'fish', 'salmon', 'tuna', 'shrimp', 'prawn', 'shellfish', 'tofu',
-  'thigh', 'breast', 'belly', 'shoulder', 'loin', 'chop', 'steak', 'mince',
-  'ground beef', 'ground pork', 'ground turkey',
+  'thigh', 'breast', 'belly', 'shoulder', 'loin', 'steak',
+  'ground beef', 'ground pork', 'ground turkey', 'ground lamb', 'ground chicken',
+  'pork chop', 'lamb chop', 'veal chop',
+  'beef mince', 'lamb mince', 'pork mince', 'minced beef', 'minced lamb', 'minced pork',
 ];
+
+// Escapes a string for safe use inside a RegExp.
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Word-boundary match instead of plain .includes(): a substring check would
+// let short/ambiguous keywords ("chop", "mince", "ham") match fragments
+// buried inside unrelated words ("chopped", "minced", "champagne"). \b works
+// fine here since every keyword above is plain ASCII letters/spaces.
+function matchesAnyKeyword(text, keywords) {
+  return keywords.some((k) => new RegExp(`\\b${escapeRegex(k)}\\b`, 'i').test(text));
+}
 
 function isMeatIngredient(ing, recipe) {
   const ingName = ing.name.toLowerCase();
@@ -184,11 +213,12 @@ function isMeatIngredient(ing, recipe) {
   // ingredient text every time. Only the ingredient line that actually
   // mentions the tagged protein counts as the "meat" line; other lines in
   // the same recipe (veg, rice, etc.) still fall through to the keyword
-  // check below.
+  // check below. Word-boundary matched for the same reason as MEAT_KEYWORDS
+  // above \u2014 a protein tag like "ham" shouldn't match "champagne vinegar".
   const protein = (recipe?.tags?.protein || '').toLowerCase().trim();
-  if (protein && ingName.includes(protein)) return true;
+  if (protein && matchesAnyKeyword(ingName, [protein])) return true;
   if (/egg\b/i.test(ingName)) return false; // eggs are a Tier-1 staple, excluded above already, but keep this explicit
-  return MEAT_KEYWORDS.some((k) => ingName.includes(k));
+  return matchesAnyKeyword(ingName, MEAT_KEYWORDS);
 }
 
 export function reverseMenuToGroceryLines(state, cycle) {
